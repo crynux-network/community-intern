@@ -11,6 +11,15 @@ class AIClient(Protocol):
     async def generate_reply(self, conversation: Conversation, context: RequestContext) -> AIResult:
         """Return a single normalized decision + optional reply."""
 
+    async def summarize_for_kb_index(
+        self,
+        *,
+        source_id: str,
+        text: str,
+        timeout_seconds: float,
+    ) -> str:
+        """Return a short plain-text description for the Knowledge Base index."""
+
 
 class AIConfig(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -22,6 +31,8 @@ class AIConfig(BaseModel):
 
     # Prompts and policy
     gating_prompt: str = ""
+    selection_prompt: str = ""
+    summarization_prompt: str = ""
     answer_prompt: str = ""
     verification_prompt: str = ""
 
@@ -51,4 +62,3 @@ class LLMClient(Protocol):
         timeout_seconds: float,
     ) -> dict[str, Any]:
         """Return structured JSON output matching the provided schema."""
-

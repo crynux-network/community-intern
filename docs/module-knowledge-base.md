@@ -1,10 +1,10 @@
-# Module Design: Knowledge Base (Ingestion + Startup Index + Retrieval)
+# Module Design: Knowledge Base
 
 ## Purpose
 
-The Knowledge Base (KB) module ingests content from local text files and web pages referenced by links, builds a small startup index describing each source, and provides retrieval helpers so the AI module can select and load only the most relevant content for a given query.
+The Knowledge Base module ingests content from local text files and web pages referenced by links, builds a small startup index describing each source, and provides retrieval helpers so the AI module can select and load only the most relevant content for a given query.
 
-The KB module is designed for **fast routing** (index-first) and **bounded retrieval** (minimum necessary context, with citations).
+The KB module is designed for fast source selection and bounded retrieval.
 
 ## Responsibilities
 
@@ -13,186 +13,131 @@ The KB module is designed for **fast routing** (index-first) and **bounded retri
   - HTTP/HTTPS links referenced inside those files
 - On each startup:
   - Analyze and summarize sources
-  - Produce a small index artifact (JSON) that can be searched quickly
+  - Produce a small index artifact that can be searched quickly
 - Provide retrieval helpers to the AI module:
-  - Select relevant sources for a query using the index
-  - Load content from those sources
-  - Extract ranked snippets suitable for grounding and citation
+  - Provide the full index text for the AI module to send to the LLM for source selection
+  - Load full content for a selected file path or URL identifier
 - Enforce safety and performance constraints:
   - Strict timeouts for web fetches
   - Caching for web content
-  - Size bounds for loaded content and snippets
+  - Size bounds for loaded content
 
 ## Terminology
 
 - **Source**: a file path or URL.
-- **Index**: a compact, searchable summary per source (identity, tags, suggested questions).
-- **Snippet**: a short excerpt of source text returned to the AI module for grounding.
+- **Index**: a compact, searchable description per source.
 
 ## Runtime configuration
 
 All configuration is loaded from `config.yaml` with environment-variable overrides as specified in `docs/configuration.md`.
 
-The Knowledge Base reads these keys (under the `kb` section):
+The Knowledge Base reads these keys under the `kb` section:
 
 - `kb.sources_dir`
 - `kb.index_path`
 - `kb.web_fetch_timeout_seconds`
 - `kb.web_fetch_cache_dir`
 - `kb.max_source_bytes`
-- `kb.max_snippet_chars`
-- `kb.max_snippets_per_query`
-- `kb.max_sources_per_query`
 
-## Index artifact format (JSON)
+## Index artifact format
 
-The index is intended to be small and fast to read at runtime. It MUST include:
+The index is intended to be small and fast to read at runtime. It MUST be a **UTF-8 text file**. The AI module may send the full index text to the LLM for source selection, so the format should prioritize readability and stable diffs.
 
-- Source identity: `source_id`, `type` (`file` or `url`), `path` or `url`
-- Short summary: 5–15 lines describing what the source covers
-- Topic tags / keywords: small controlled set for routing
-- Suggested questions: examples the source is good at answering
+The index MUST be a sequence of entries. Each entry MUST be:
 
-Recommended JSON shape:
+- A single line containing the source identifier:
+  - For files: the file path relative to the knowledge base folder
+  - For web sources: the full URL
+- Followed by one or more lines of free-text description for source selection
 
-```json
-{
-  "version": 1,
-  "generated_at": "2026-01-12T00:00:00Z",
-  "sources": [
-    {
-      "source_id": "file:docs/setup.txt",
-      "type": "file",
-      "path": "docs/setup.txt",
-      "summary": ["..."],
-      "tags": ["..."],
-      "suggested_questions": ["..."]
-    },
-    {
-      "source_id": "url:https://example.com/guide",
-      "type": "url",
-      "url": "https://example.com/guide",
-      "summary": ["..."],
-      "tags": ["..."],
-      "suggested_questions": ["..."]
-    }
-  ]
-}
-```
+Entries MUST be separated by at least one blank line.
 
-The index artifact MUST be JSON.
-
-See the example index file: `examples/kb_index.json`.
+See the example index file: `examples/kb_index.txt`.
 
 Notes:
-- `source_id` must be stable across runs for citation stability.
-- `summary` is a list of lines to keep index diffs readable.
-- Tags should come from a controlled vocabulary to avoid tag explosion.
+- The identifier line must be stable across runs for citation stability.
+- Keep descriptions short and focused on when the source is relevant.
 
-## Public interfaces (used by AI module)
+## Public interfaces
 
 The AI module should not know about filesystem scanning or HTTP caching details. It should call a small retrieval API.
 
-See:
+See `src/discord_intern/kb/interfaces.py` `KnowledgeBase`.
 
-- `src/discord_intern/kb/interfaces.py` (`KnowledgeBase`, `Source`, `Snippet`)
-
-## Ingestion (startup)
+## Ingestion
 
 ### File scanning
 
 - Scan `kb.sources_dir` for text files.
-- Read file content with a hard size cap (`kb.max_source_bytes`).
 - Extract embedded HTTP/HTTPS links from file content to form URL sources.
 
 ### URL fetching
 
-- Fetch with strict timeout (`kb.web_fetch_timeout_seconds`).
-- Cache responses (memory or disk) keyed by URL and fetch timestamp.
-- Enforce max download size (`kb.max_source_bytes`) and reject larger responses.
+- Fetch with strict timeout `kb.web_fetch_timeout_seconds`.
+- Cache responses in memory or on disk using a hash of the URL as the cache key and file name.
+- Enforce max download size `kb.max_source_bytes` and reject larger responses.
 
 ### Index generation
 
 For each source:
-- Produce a short summary (5–15 lines) and tags.
-- Include suggested questions for routing and debugging.
-
-Implementation options for summarization:
-- Initially: lightweight heuristic summarization (headings + key lines).
-- Later: LLM-assisted summarization (run once at startup, bounded cost).
+- Use an LLM to produce a short description focused on what the source covers and when it is relevant.
+- The LLM summarization MUST be performed via the AI module's dedicated summarization method. See `docs/module-ai-response.md`.
 
 The index generation step should be deterministic as much as possible to avoid noisy diffs.
 
-## Retrieval (runtime, index-first)
+## Retrieval
 
-### Step 1: source selection
+The Knowledge Base does not decide which sources are relevant.
 
-Given a query:
-- Search the index (keyword/tag match + optional simple scoring).
-- Select top `kb.max_sources_per_query` sources.
+At runtime, the AI module:
 
-### Step 2: snippet extraction
-
-For each selected source:
-- Load the content (file read or cached web page).
-- Extract a bounded set of snippets relevant to the query.
-
-Initial snippet extraction strategy (simple and robust):
-- Split content into paragraphs/sections.
-- Score each chunk by term overlap with query tokens.
-- Return top K chunks across all sources.
-
-### Step 3: bounding and deduplication
-
-- Deduplicate snippets by normalized text.
-- Truncate to `kb.max_snippets_per_query`.
-- Ensure each snippet is at most `kb.max_snippet_chars`.
+- Loads the index artifact as plain text from the Knowledge Base.
+- Sends the index text and the user query to the LLM to select a relevant list of file paths and/or URLs.
+- Requests full content for those selected identifiers from the Knowledge Base.
 
 ## Citation design
 
 The KB module must maintain `source_id` continuity:
 
-- The AI module cites sources using `source_id`.
+- The AI module cites sources using the identifier line from the index.
 - Optionally, each snippet may later include location metadata:
   - file line ranges
   - URL fragment identifiers
 
-For now, `source_id` plus an optional quoted excerpt is sufficient.
+For now, the identifier plus an optional quoted excerpt is sufficient.
 
 ## Error handling
 
 - If index is missing or invalid:
-  - Fail startup (recommended) or rebuild index automatically.
+  - Fail startup or rebuild index automatically.
 - If a web source fetch fails:
   - Log and continue; do not block answering if other sources are available.
-- If no sources/snippets are found:
-  - Return an empty snippet list; the AI module decides whether to reply.
+- If no selected sources can be loaded:
+  - Return empty source content; the AI module decides whether to reply.
 
 ## Observability
 
-Logs (structured):
+Logs:
 
 - Index build:
   - `sources_total`, `file_sources_total`, `url_sources_total`, `duration_ms`
   - per-source failures with `source_id` and reason
 - Retrieval:
-  - `query`, `selected_sources`, `snippets_returned`, `duration_ms`
+  - `query`, `selected_sources`, `loaded_sources`, `duration_ms`
   - cache hits/misses for URL fetches
 
-Metrics (recommended):
+Metrics:
 
 - `kb_index_build_total{result=success|error}`
 - `kb_web_fetch_total{result=success|timeout|error|cache_hit}`
 - `kb_retrieval_selected_sources_histogram`
-- `kb_retrieval_snippets_histogram`
+- `kb_retrieval_loaded_sources_histogram`
 
 ## Test plan
 
 - Unit tests:
   - Link extraction from file content
-  - Index read/write and schema validation
-  - Source selection scoring
-  - Snippet extraction and bounding
+  - Index read/write and format validation
 - Integration tests:
   - Build index from a sample folder with a mix of files and URLs
-  - Retrieval returns stable `source_id`s and bounded snippet sizes
+  - Loading selected source content returns stable identifiers
