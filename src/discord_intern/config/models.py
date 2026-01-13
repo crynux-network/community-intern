@@ -29,7 +29,7 @@ class FileRotationSettings(BaseModel):
 class FileLoggingSettings(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    path: str = ""
+    path: str = "data/logs/discord-intern.log"
     rotation: FileRotationSettings = Field(default_factory=FileRotationSettings)
 
 
@@ -50,11 +50,11 @@ class DiscordSettings(BaseModel):
 class KnowledgeBaseSettings(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    sources_dir: str = "kb/sources"
-    index_path: str = "kb/index.json"
+    sources_dir: str = "data/knowledge-base/sources"
+    index_path: str = "data/knowledge-base/index.json"
 
     web_fetch_timeout_seconds: float = 10
-    web_fetch_cache_dir: str = "kb/web-cache"
+    web_fetch_cache_dir: str = "data/knowledge-base/web-cache"
 
     max_source_bytes: int = 2_000_000
     max_snippet_chars: int = 1200
@@ -87,6 +87,6 @@ class ConfigLoadRequest:
     Implementations may use these to control where configuration is read from.
     """
 
-    yaml_path: str = "config.yaml"
+    yaml_path: str = "data/config/config.yaml"
     env_prefix: str = "APP__"
     dotenv_path: Optional[str] = ".env"

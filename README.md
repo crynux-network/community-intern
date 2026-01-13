@@ -47,7 +47,7 @@ pip install -r requirements.txt
 
 ### 3) Create `config.yaml`
 
-Start from `examples/config.yaml` and copy it to `config.yaml` at the repository root.
+Start from `examples/config.yaml` and copy it to `data/config/config.yaml`.
 
 At minimum, set:
 

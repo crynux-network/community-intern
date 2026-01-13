@@ -24,7 +24,7 @@ def _read_yaml_config(path: Path) -> dict[str, Any]:
         import yaml  # type: ignore[import-not-found]
     except ModuleNotFoundError as e:  # pragma: no cover
         raise ModuleNotFoundError(
-            "Missing dependency: PyYAML is required to load config.yaml. Install 'PyYAML'."
+            "Missing dependency: PyYAML is required to load the YAML config file. Install 'PyYAML'."
         ) from e
 
     if not path.exists():

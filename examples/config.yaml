@@ -4,7 +4,7 @@ app:
 logging:
   level: INFO
   file:
-    path: ""
+    path: "data/logs/discord-intern.log"
     rotation:
       backup_count: 5
 
@@ -37,11 +37,11 @@ ai:
   require_citations: true
 
 kb:
-  sources_dir: "kb/sources"
-  index_path: "kb/index.json"
+  sources_dir: "data/knowledge-base/sources"
+  index_path: "data/knowledge-base/index.json"
 
   web_fetch_timeout_seconds: 10
-  web_fetch_cache_dir: "kb/web-cache"
+  web_fetch_cache_dir: "data/knowledge-base/web-cache"
 
   max_source_bytes: 2000000
   max_snippet_chars: 1200

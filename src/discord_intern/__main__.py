@@ -17,8 +17,8 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="discord-intern", description="Discord Intern bot runner")
     parser.add_argument(
         "--config",
-        default="config.yaml",
-        help="Path to config.yaml (default: config.yaml)",
+        default="data/config/config.yaml",
+        help="Path to config.yaml (default: data/config/config.yaml)",
     )
     parser.add_argument(
         "--no-dotenv",
