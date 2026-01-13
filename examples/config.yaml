@@ -10,7 +10,6 @@ logging:
 
 discord:
   token: "REPLACE_ME"
-  monitored_channel_ids: []
   ai_timeout_seconds: 30
 
 ai:

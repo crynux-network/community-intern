@@ -20,7 +20,7 @@ Primary documentation entry points:
 ## Goals and non-goals
 
 - **Goals**
-  - Monitor configured Discord channels and respond to FAQ-like questions with grounded answers.
+  - Monitor all Discord channels the bot can read (based on Discord permissions) and respond to FAQ-like questions with grounded answers.
   - Create responses in **threads**, keeping the main channel clean.
   - Keep the AI module **stateless**: it must not persist chat history; conversation context is provided by the bot adapter.
   - Support a knowledge base made of:
@@ -43,7 +43,7 @@ The system is split into three modules:
 
 ### Data flow (happy path)
 
-- A message is posted in a monitored channel.
+- A message is posted in a channel the bot can read.
 - The Discord adapter packages the message into a thread context (a `Conversation` with exactly one message) and calls the AI module.
 - The AI module decides whether to respond.
   - If **no**, the adapter does nothing.
@@ -54,7 +54,7 @@ The system is split into three modules:
 
 ### Responsibilities
 
-- Connect to Discord and subscribe to events for configured channels.
+- Connect to Discord and subscribe to events for all readable channels.
 - Normalize Discord messages and threads into a platform-neutral format for the AI module.
 - Decide routing (adapter concern only; the AI module always receives a thread context):
   - **New channel message** -> call AI module with a thread containing exactly one message

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Optional, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -43,7 +44,6 @@ class DiscordSettings(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     token: str = "REPLACE_ME"
-    monitored_channel_ids: tuple[str, ...] = ()
     ai_timeout_seconds: float = 30
 
 
@@ -79,6 +79,7 @@ class AppConfig(BaseModel):
     kb: KnowledgeBaseSettings = Field(default_factory=KnowledgeBaseSettings)
 
 
+@dataclass(frozen=True, slots=True)
 class ConfigLoadRequest:
     """
     Optional inputs for a configuration loader.

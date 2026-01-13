@@ -35,7 +35,6 @@ Mapping rules:
 Example mappings:
 
 - `APP__DISCORD__TOKEN` -> `discord.token`
-- `APP__DISCORD__MONITORED_CHANNEL_IDS` -> `discord.monitored_channel_ids`
 - `APP__AI__REQUEST_TIMEOUT_SECONDS` -> `ai.request_timeout_seconds`
 - `APP__KB__SOURCES_DIR` -> `kb.sources_dir`
 

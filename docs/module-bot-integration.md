@@ -2,16 +2,16 @@
 
 ## Purpose
 
-The Discord adapter connects to Discord, listens to configured channels and threads, normalizes Discord events into a platform-neutral `Conversation`, calls the AI module, and posts the AI result inside message-backed threads.
+The Discord adapter connects to Discord, listens to all channels it can read (based on Discord permissions) and eligible threads, normalizes Discord events into a platform-neutral `Conversation`, calls the AI module, and posts the AI result inside message-backed threads.
 
 This module owns **all Discord-specific concerns**: intents, permissions, rate limits, and thread creation.
 
 ## Responsibilities
 
-- Subscribe to Discord gateway events for configured channels.
+- Subscribe to Discord gateway events for all readable channels.
 - Normalize Discord messages and threads into a platform-neutral format.
 - Route events:
-  - New monitored-channel message -> call AI with a single-message conversation.
+  - New channel message -> call AI with a single-message conversation.
   - Thread update (thread previously answered by bot) -> call AI with full thread context.
 - Create message-backed threads and post replies.
 - Enforce safety policies:
@@ -30,7 +30,6 @@ All configuration is loaded from `config.yaml` with environment-variable overrid
 The adapter reads these keys:
 
 - `discord.token`
-- `discord.monitored_channel_ids`
 - `discord.ai_timeout_seconds`
 - `app.dry_run`
 
@@ -59,7 +58,7 @@ See:
 - Enable **only required intents**.
 - The bot must have `Intents.message_content` enabled (Developer Portal + code) because it reads arbitrary message text.
 - Ensure permissions for:
-  - Reading messages in monitored channels
+  - Reading messages in channels you want the bot to monitor
   - Creating threads from messages
   - Sending messages in threads
 
@@ -69,7 +68,7 @@ The adapter is implemented as a single Discord.py Cog:
 
 - `MessageRouterCog`
   - Handles all message events via `on_message`.
-  - If the message is in a monitored channel (and not a thread):
+  - If the message is in a guild channel (and not a thread):
     - Calls AI with a single-message conversation.
     - If `should_reply=true`, creates a message-backed thread and posts the answer.
   - If the message is in a thread:
@@ -112,7 +111,7 @@ Definition:
 
 ## Sequence diagrams
 
-### New monitored channel message -> create thread -> post answer
+### New channel message -> create thread -> post answer
 
 ```mermaid
 sequenceDiagram
@@ -121,7 +120,7 @@ sequenceDiagram
   participant A as Discord Adapter
   participant AI as AI Module
 
-  U->>D: Post message in monitored channel
+  U->>D: Post message in a channel the bot can read
   D->>A: on_message(channel_message)
   A->>A: Normalize -> Conversation + RequestContext
   A->>AI: generate_reply(conversation, context)
