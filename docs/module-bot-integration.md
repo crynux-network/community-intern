@@ -11,7 +11,7 @@ This module owns **all Discord-specific concerns**: intents, permissions, rate l
 - Subscribe to Discord gateway events for all readable channels.
 - Normalize Discord messages and threads into a platform-neutral format.
 - Route events:
-  - New channel message -> call AI with a single-message conversation.
+  - New channel message -> wait for a user message burst, call AI with the batched user messages.
   - Thread update (thread previously answered by bot) -> call AI with full thread context.
 - Create message-backed threads and post replies.
 - Enforce safety policies:
@@ -31,6 +31,7 @@ The adapter reads these keys:
 
 - `discord.token`
 - `discord.ai_timeout_seconds`
+- `discord.message_batch_wait_seconds`
 - `app.dry_run`
 
 The adapter derives `BOT_USER_ID` at runtime after login.
@@ -69,8 +70,9 @@ The adapter is implemented as a single Discord.py Cog:
 - `MessageRouterCog`
   - Handles all message events via `on_message`.
   - If the message is in a guild channel (and not a thread):
-    - Calls AI with a single-message conversation.
-    - If `should_reply=true`, creates a message-backed thread and posts the answer.
+    - Batches consecutive messages from the same user in the same channel.
+    - Waits for a quiet window before calling AI.
+    - If `should_reply=true`, creates a message-backed thread from the last message and posts the answer.
   - If the message is in a thread:
     - Fetch the full thread history.
     - If the bot has not posted in the thread (detected by scanning the thread history for `author_id == BOT_USER_ID`), ignore the message.
@@ -87,7 +89,7 @@ Definition:
 
 ### Message selection
 
-- Channel message flow: the `Conversation` contains exactly one user message (the triggering message).
+- Channel message flow: the `Conversation` contains consecutive user messages from the same author in the same channel, ordered oldest -> newest, after a quiet window.
 - Thread update flow: the `Conversation` contains the full thread history, ordered oldest -> newest.
 
 ### Role mapping
@@ -105,13 +107,28 @@ Definition:
 ## Posting policy
 
 - Post answers only in threads:
-  - For new channel messages, create a message-backed thread from the triggering message.
+  - For new channel messages, create a message-backed thread from the last message in the batch.
   - For thread updates, reply in the same thread.
 - If AI returns `should_reply=false`, do nothing (no thread creation, no message posting).
 
+## User message batching
+
+The adapter groups consecutive channel messages per user and per channel.
+
+Rules:
+
+- Start a wait timer after receiving a user message in a channel.
+- If another message from the same user arrives before the timer expires, reset the timer and keep the messages in the same batch.
+- Messages from other users do not affect the timer.
+- When the timer expires, send the batched messages to the AI as a single conversation.
+
+Default behavior:
+
+- Wait `discord.message_batch_wait_seconds`, default is 60 seconds.
+
 ## Sequence diagrams
 
-### New channel message -> create thread -> post answer
+### New channel message batch -> create thread -> post answer
 
 ```mermaid
 sequenceDiagram
@@ -120,15 +137,15 @@ sequenceDiagram
   participant A as Discord Adapter
   participant AI as AI Module
 
-  U->>D: Post message in a channel the bot can read
+  U->>D: Post one or more messages in a channel the bot can read
   D->>A: on_message(channel_message)
-  A->>A: Normalize -> Conversation + RequestContext
+  A->>A: Wait for quiet window and build batched Conversation
   A->>AI: generate_reply(conversation, context)
   AI-->>A: AIResult(should_reply, reply_text, citations)
   alt should_reply = false
     A-->>D: (no action)
   else should_reply = true
-    A->>D: Create message-backed thread
+    A->>D: Create message-backed thread from the last message
     A->>D: Post reply in thread
   end
 ```
@@ -198,6 +215,7 @@ Log fields per handled event:
   - Normalization (Discord message -> `Message`)
   - Routing decision (channel vs thread, bot-authored message filtering)
   - “Answered thread” registry behavior
+  - User message batching per channel and per author
 - Integration tests (manual or mocked):
   - Create message-backed thread from a channel message
   - Thread follow-up flow with full history

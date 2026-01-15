@@ -11,6 +11,7 @@ logging:
 discord:
   token: "REPLACE_ME"
   ai_timeout_seconds: 30
+  message_batch_wait_seconds: 60
 
 ai:
   llm_base_url: "https://bridge.crynux-as.xyz/v1/llm"
