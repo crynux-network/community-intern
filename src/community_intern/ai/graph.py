@@ -55,7 +55,7 @@ class LLMSelectionResult(BaseModel):
     selected_source_ids: List[str] = Field(description="List of source IDs relevant to the query")
 
 class LLMGenerationResult(BaseModel):
-    answer: str = Field(description="The generated answer text")
+    answer: Optional[str] = Field(description="The generated answer text, or null if the question cannot be answered from the provided context")
 
 class LLMVerificationResult(BaseModel):
     is_good_enough: bool = Field(description="Whether the answer is safe and accurate enough to post")
@@ -87,8 +87,8 @@ async def node_gating(state: GraphState, *, llm: ChatOpenAI) -> Dict[str, Any]:
             "user_question": last_msg,
             "should_reply": decision.should_reply,
         }
-    except Exception as e:
-        logger.exception("ai.gating_failed")
+    except Exception:
+        logger.exception("AI gating step failed.")
         return {
             "should_reply": False
         }
@@ -101,8 +101,8 @@ async def node_selection(state: GraphState, *, llm: ChatOpenAI) -> Dict[str, Any
 
     try:
         kb_index_text = await kb.load_index_text()
-    except Exception as e:
-        logger.error(f"Failed to load KB index: {e}")
+    except Exception:
+        logger.exception("Failed to load knowledge base index.")
         return {"selected_source_ids": [], "should_reply": False}
 
     structured_llm = llm.with_structured_output(LLMSelectionResult)
@@ -125,8 +125,8 @@ async def node_selection(state: GraphState, *, llm: ChatOpenAI) -> Dict[str, Any
             return {"selected_source_ids": [], "should_reply": False}
 
         return {"selected_source_ids": selected_ids, "kb_index_text": kb_index_text}
-    except Exception as e:
-        logger.exception("ai.selection_failed")
+    except Exception:
+        logger.exception("AI knowledge base source selection failed.")
         return {"selected_source_ids": [], "should_reply": False}
 
 
@@ -168,9 +168,19 @@ async def node_generation(state: GraphState, *, llm: ChatOpenAI) -> Dict[str, An
 
     try:
         result: LLMGenerationResult = await structured_llm.ainvoke(messages)
-        return {"draft_answer": result.answer}
-    except Exception as e:
-        logger.exception("ai.generation_failed")
+        answer = (result.answer or "").strip()
+        if not answer:
+            return {"draft_answer": "", "should_reply": False}
+        if not config.enable_verification:
+            return {
+                "draft_answer": answer,
+                "verification": None,
+                "should_reply": True,
+                "final_reply_text": answer,
+            }
+        return {"draft_answer": answer}
+    except Exception:
+        logger.exception("AI answer generation failed.")
         return {"should_reply": False}
 
 
@@ -208,8 +218,8 @@ async def node_verification(state: GraphState, *, llm: ChatOpenAI) -> Dict[str, 
                 "verification": False,
                 "should_reply": False
             }
-    except Exception as e:
-        logger.exception("ai.verification_failed")
+    except Exception:
+        logger.exception("AI answer verification failed.")
         return {"should_reply": False}
 
 
@@ -257,7 +267,9 @@ def build_ai_graph(config: AIConfig) -> Runnable:
 
     def check_generation(state: GraphState) -> str:
         if state.get("should_reply", False) and state.get("draft_answer"):
-            return "verification"
+            if state["config"].enable_verification:
+                return "verification"
+            return END
         return END
 
     def check_verification(state: GraphState) -> str:
