@@ -27,6 +27,7 @@ class AIConfig(BaseModel):
     llm_base_url: str
     llm_api_key: str
     llm_model: str
+    vram_limit: int
 
     # Timeouts and retries
     graph_timeout_seconds: float

@@ -140,7 +140,7 @@ The module interacts with the LLM in two ways, depending on the complexity of th
 
 1.  **Via LangChain (used in `generate_reply`)**:
     - **Context**: Used within the **LangGraph workflow** for complex, multi-step orchestration (Gating, Selection, Generation, Verification).
-    - **Mechanism**: Uses `langchain-openai` (`ChatOpenAI`) as the standard client. A single `ChatOpenAI` instance is created at startup and injected into the graph nodes.
+    - **Mechanism**: Uses `langchain-crynux` (`ChatCrynux`, ChatOpenAI-compatible) as the standard client. A single `ChatCrynux` instance is created at startup and injected into the graph nodes.
 
 2.  **Via Direct HTTP (used in `summarize_for_kb_index`)**:
     - **Context**: Used by the **Knowledge Base indexer** for simple, single-shot text processing.
@@ -160,6 +160,7 @@ The AI module is configured under the `ai` section in `config.yaml`.
 - `llm_base_url`: Base URL for the LLM API.
 - `llm_api_key`: API key for the LLM.
 - `llm_model`: Model name to use.
+- `vram_limit`: Minimum GPU VRAM required for the inference run in GB.
 - `llm_timeout_seconds`: Timeout per individual LLM call (network timeout).
 - `max_retries`: Maximum retry attempts for transient failures.
 
