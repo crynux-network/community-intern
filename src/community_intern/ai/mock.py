@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Type, TypeVar
+from typing import Any, Type, TypeVar
 
 from pydantic import BaseModel
 
@@ -47,4 +47,29 @@ class MockAIClient:
         response_model: Type[T],
     ) -> T:
         """Mock LLM invocation that returns dummy responses."""
-        return response_model.model_construct()
+        _ = system_prompt
+        _ = user_content
+
+        try:
+            return response_model.model_validate({})
+        except Exception:
+            return response_model.model_validate(_build_required_placeholders(response_model))
+
+
+def _build_required_placeholders(model: Type[BaseModel]) -> dict[str, Any]:
+    data: dict[str, Any] = {}
+    for name, field in model.model_fields.items():
+        if not field.is_required():
+            continue
+        annotation = field.annotation
+        if annotation is str:
+            data[name] = "mock"
+        elif annotation is bool:
+            data[name] = False
+        elif annotation is int:
+            data[name] = 0
+        elif annotation is float:
+            data[name] = 0.0
+        else:
+            data[name] = None
+    return data

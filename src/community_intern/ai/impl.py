@@ -149,4 +149,11 @@ class AIClientImpl(AIClient):
             structured_llm.ainvoke(messages),
             timeout=self._config.llm_timeout_seconds,
         )
-        return result
+        if result is None:
+            raise RuntimeError("LLM returned null structured output.")
+        try:
+            return response_model.model_validate(result)
+        except Exception as exc:
+            raise RuntimeError(
+                f"LLM returned unexpected structured output. expected={response_model.__name__} got={type(result).__name__}"
+            ) from exc

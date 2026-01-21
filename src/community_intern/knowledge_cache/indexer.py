@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Iterable, Protocol
@@ -54,12 +55,13 @@ class KnowledgeIndexer:
         self._index_path = Path(index_path)
         self._index_prefix = index_prefix
         self._summarization_prompt = summarization_prompt
+        self._summarization_concurrency = max(1, int(summarization_concurrency))
         self._ai_client = ai_client
         self._providers = list(providers)
         self._source_type_order = source_type_order
 
         self._lock = asyncio.Lock()
-        self._summary_semaphore = asyncio.Semaphore(max(1, int(summarization_concurrency)))
+        self._summary_semaphore = asyncio.Semaphore(self._summarization_concurrency)
 
     async def run_once(self) -> None:
         async with self._lock:
@@ -70,17 +72,50 @@ class KnowledgeIndexer:
         await self.run_once()
 
     async def _run_once_locked(self) -> None:
+        run_started = time.monotonic()
+        stages_total = 4
+
         now = utc_now()
+
+        stage = 1
+        stage_started = time.monotonic()
+        logger.info("KB index stage %s/%s: load cache.", stage, stages_total)
         cache = read_cache_file(self._cache_path)
         if cache.schema_version != SchemaVersion:
             cache = CacheState(schema_version=SchemaVersion, generated_at=format_rfc3339(now), sources={})
+        logger.debug(
+            "KB index load cache completed. path=%s sources=%s elapsed_ms=%s",
+            self._cache_path,
+            len(cache.sources),
+            int((time.monotonic() - stage_started) * 1000),
+        )
 
+        stage = 2
+        stage_started = time.monotonic()
+        logger.info("KB index stage %s/%s: discover sources.", stage, stages_total)
         discovered, owner = await self._discover_sources(now=now)
+        logger.info(
+            "KB index discover completed. sources=%s elapsed_ms=%s",
+            len(discovered),
+            int((time.monotonic() - stage_started) * 1000),
+        )
 
+        stage = 3
+        stage_started = time.monotonic()
+        logger.info("KB index stage %s/%s: reconcile and refresh providers.", stage, stages_total)
         changed = False
         changed |= await self._reconcile(cache=cache, now=now, discovered=discovered, owner=owner)
 
-        for provider in self._providers:
+        for provider_idx, provider in enumerate(self._providers, start=1):
+            provider_name = type(provider).__name__
+            logger.info(
+                "KB index stage %s/%s: provider refresh %s/%s. provider=%s",
+                stage,
+                stages_total,
+                provider_idx,
+                len(self._providers),
+                provider_name,
+            )
             try:
                 provider_changed = await provider.refresh(cache=cache, now=now)
             except Exception:
@@ -90,9 +125,21 @@ class KnowledgeIndexer:
                 changed = True
 
         if changed:
+            logger.debug("KB index persist started.")
             self._persist(cache=cache, now=now)
+            logger.debug("KB index persist completed. cache_path=%s index_path=%s", self._cache_path, self._index_path)
 
+        logger.info(
+            "KB index reconcile/refresh completed. changed=%s elapsed_ms=%s",
+            changed,
+            int((time.monotonic() - stage_started) * 1000),
+        )
+
+        stage = 4
+        logger.info("KB index stage %s/%s: summarize pending sources.", stage, stages_total)
         await self._summarize_pending(cache=cache, now=now, owner=owner)
+        logger.info("KB index stage %s/%s completed.", stage, stages_total)
+        logger.info("KB index run completed. elapsed_ms=%s", int((time.monotonic() - run_started) * 1000))
 
     async def _discover_sources(self, *, now: datetime) -> tuple[Dict[str, SourceType], Dict[str, SourceProvider]]:
         combined: Dict[str, SourceType] = {}
@@ -121,17 +168,49 @@ class KnowledgeIndexer:
                 cache.sources.pop(source_id, None)
                 changed = True
 
+        init_candidates: list[tuple[str, SourceType, SourceProvider]] = []
         for source_id, source_type in discovered.items():
             record = cache.sources.get(source_id)
             if record is None or record.source_type != source_type:
                 provider = owner.get(source_id)
                 if provider is None:
                     continue
-                initialized = await provider.init_record(source_id=source_id, now=now)
-                if initialized is None:
-                    continue
-                cache.sources[source_id] = initialized
-                changed = True
+                init_candidates.append((source_id, source_type, provider))
+
+        if init_candidates:
+            logger.info("KB index init new sources. pending=%s", len(init_candidates))
+
+        for idx, (source_id, source_type, provider) in enumerate(init_candidates, start=1):
+            provider_name = type(provider).__name__
+            logger.info(
+                "KB index init source %s/%s. source_id=%s type=%s provider=%s",
+                idx,
+                len(init_candidates),
+                source_id,
+                source_type,
+                provider_name,
+            )
+            started = time.monotonic()
+            initialized = await provider.init_record(source_id=source_id, now=now)
+            elapsed_ms = int((time.monotonic() - started) * 1000)
+            if initialized is None:
+                logger.warning(
+                    "KB index init source failed. source_id=%s type=%s provider=%s elapsed_ms=%s",
+                    source_id,
+                    source_type,
+                    provider_name,
+                    elapsed_ms,
+                )
+                continue
+            cache.sources[source_id] = initialized
+            changed = True
+            logger.debug(
+                "KB index init source completed. source_id=%s type=%s provider=%s elapsed_ms=%s",
+                source_id,
+                source_type,
+                provider_name,
+                elapsed_ms,
+            )
 
         if changed:
             cache.generated_at = format_rfc3339(now)
@@ -145,15 +224,38 @@ class KnowledgeIndexer:
         owner: Dict[str, SourceProvider],
     ) -> None:
         tasks = []
+        pending: list[tuple[str, CacheRecord, SourceProvider]] = []
         for source_id, record in cache.sources.items():
             if not record.summary_pending:
                 continue
             provider = owner.get(source_id)
             if provider is None:
                 continue
+            pending.append((source_id, record, provider))
+
+        if not pending:
+            logger.info("KB index summarize pending. pending=0")
+            return
+
+        logger.info(
+            "KB index summarize pending. pending=%s concurrency=%s",
+            len(pending),
+            self._summarization_concurrency,
+        )
+
+        for idx, (source_id, record, provider) in enumerate(pending, start=1):
+            logger.debug("KB index summarize queued %s/%s. source_id=%s", idx, len(pending), source_id)
             tasks.append(
                 asyncio.create_task(
-                    self._summarize_one(cache=cache, record=record, source_id=source_id, provider=provider, now=now)
+                    self._summarize_one(
+                        cache=cache,
+                        record=record,
+                        source_id=source_id,
+                        provider=provider,
+                        now=now,
+                        position=idx,
+                        total=len(pending),
+                    )
                 )
             )
         if tasks:
@@ -167,15 +269,28 @@ class KnowledgeIndexer:
         source_id: str,
         provider: SourceProvider,
         now: datetime,
+        position: int,
+        total: int,
     ) -> None:
         async with self._summary_semaphore:
+            logger.info("KB index summarize %s/%s: start. source_id=%s", position, total, source_id)
+            started = time.monotonic()
             try:
                 text = await provider.load_text(source_id=source_id)
                 if not text or not text.strip():
+                    logger.warning("KB index summarize %s/%s: empty source text. source_id=%s", position, total, source_id)
                     return
                 system_prompt = _compose_system_prompt(
                     self._summarization_prompt,
                     self._ai_client.project_introduction,
+                )
+                logger.debug(
+                    "KB index summarize %s/%s: invoking LLM. source_id=%s text_chars=%s system_prompt_chars=%s",
+                    position,
+                    total,
+                    source_id,
+                    len(text),
+                    len(system_prompt),
                 )
                 result = await self._ai_client.invoke_llm(
                     system_prompt=system_prompt,
@@ -186,6 +301,14 @@ class KnowledgeIndexer:
             except Exception:
                 logger.exception("Indexer summarization failed. source_id=%s", source_id)
                 return
+            finally:
+                logger.debug(
+                    "KB index summarize %s/%s: finished LLM call. source_id=%s elapsed_ms=%s",
+                    position,
+                    total,
+                    source_id,
+                    int((time.monotonic() - started) * 1000),
+                )
 
         current = cache.sources.get(source_id)
         if current is not record or not current.summary_pending:
@@ -194,6 +317,13 @@ class KnowledgeIndexer:
         current.last_indexed_at = format_rfc3339(now)
         current.summary_pending = False
         self._persist(cache=cache, now=now)
+        logger.info(
+            "KB index summarize %s/%s: saved. source_id=%s summary_chars=%s",
+            position,
+            total,
+            source_id,
+            len(summary),
+        )
 
     def _persist(self, *, cache: CacheState, now: datetime) -> None:
         cache.generated_at = format_rfc3339(now)

@@ -27,6 +27,7 @@ class UrlLinksProvider:
         self._urls = {}
         links_file = Path(self._config.links_file_path)
         if not links_file.exists():
+            logger.debug("UrlLinksProvider discover: links file missing. path=%s", links_file)
             return {}
         try:
             content = links_file.read_text(encoding="utf-8")
@@ -34,6 +35,7 @@ class UrlLinksProvider:
             logger.warning("Failed to read links file. path=%s error=%s", links_file, e)
             return {}
 
+        logger.debug("UrlLinksProvider discover: start. links_file=%s", links_file)
         sources: Dict[str, SourceType] = {}
         for line in content.splitlines():
             url = line.strip()
@@ -43,6 +45,8 @@ class UrlLinksProvider:
                 continue
             sources[url] = "url"
             self._urls[url] = url
+            logger.debug("UrlLinksProvider discover: found URL. url=%s", url)
+        logger.debug("UrlLinksProvider discover: completed. discovered=%s", len(sources))
         return sources
 
     async def init_record(self, *, source_id: str, now: datetime) -> CacheRecord | None:
@@ -50,6 +54,7 @@ class UrlLinksProvider:
         if not url:
             return None
 
+        logger.debug("UrlLinksProvider init_record: start. url=%s", url)
         async with WebFetcher(self._config) as fetcher:
             text = await self._fetch_url_text(fetcher, url, force_refresh=True)
         if not text:
@@ -57,6 +62,7 @@ class UrlLinksProvider:
             return None
 
         content_hash = hash_text(text)
+        logger.debug("UrlLinksProvider init_record: completed. url=%s text_chars=%s", url, len(text))
         return CacheRecord(
             source_type="url",
             content_hash=content_hash,
@@ -82,9 +88,11 @@ class UrlLinksProvider:
                 url_records.append(record)
 
         if not url_records:
+            logger.debug("UrlLinksProvider refresh: no eligible URLs.")
             return False
 
         changed_any = False
+        logger.debug("UrlLinksProvider refresh: start. eligible=%s", len(url_records))
         async with WebFetcher(self._config) as fetcher:
             tasks = [
                 asyncio.create_task(self._refresh_one(cache=cache, record=record, now=now, fetcher=fetcher))
@@ -92,6 +100,7 @@ class UrlLinksProvider:
             ]
             results = await asyncio.gather(*tasks)
         changed_any = any(results)
+        logger.debug("UrlLinksProvider refresh: completed. changed_any=%s", changed_any)
         return changed_any
 
     async def load_text(self, *, source_id: str) -> str | None:
@@ -113,6 +122,12 @@ class UrlLinksProvider:
             return False
         url_meta = record.url
 
+        logger.debug(
+            "UrlLinksProvider refresh_one: start. url=%s etag=%s last_modified=%s",
+            url_meta.url,
+            url_meta.etag,
+            url_meta.last_modified,
+        )
         try:
             status, etag, last_modified = await self._conditional_request_limited(
                 url=url_meta.url,
@@ -128,6 +143,13 @@ class UrlLinksProvider:
             logger.exception("Unexpected URL refresh error. url=%s", url_meta.url)
             return self._mark_url_failure(record, "error", now)
 
+        logger.debug(
+            "UrlLinksProvider refresh_one: conditional request result. url=%s status=%s etag=%s last_modified=%s",
+            url_meta.url,
+            status,
+            etag,
+            last_modified,
+        )
         if status == 304:
             url_meta.fetch_status = "not_modified"
             url_meta.last_fetched_at = format_rfc3339(now)
@@ -154,10 +176,14 @@ class UrlLinksProvider:
         record.content_hash = content_hash
         if should_summarize:
             record.summary_pending = True
+            logger.debug("UrlLinksProvider refresh_one: content changed; summary pending. url=%s", url_meta.url)
+        else:
+            logger.debug("UrlLinksProvider refresh_one: content unchanged; summary not needed. url=%s", url_meta.url)
         return True
 
     async def _fetch_url_text(self, fetcher: WebFetcher, url: str, *, force_refresh: bool) -> str:
         async with self._download_semaphore:
+            logger.debug("UrlLinksProvider fetch_url_text: start. url=%s force_refresh=%s", url, force_refresh)
             return await fetcher.fetch(url, force_refresh=force_refresh)
 
     async def _conditional_request_limited(
