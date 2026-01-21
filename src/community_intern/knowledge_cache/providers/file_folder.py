@@ -22,9 +22,15 @@ class FileFolderProvider:
         self._file_sources = {}
 
         if not self._sources_dir.exists():
+            logger.debug("FileFolderProvider discover: sources_dir missing. path=%s", self._sources_dir)
             return sources
 
+        logger.debug("FileFolderProvider discover: start. sources_dir=%s", self._sources_dir)
+        scanned = 0
         for file_path in self._sources_dir.rglob("*"):
+            scanned += 1
+            if scanned % 2000 == 0:
+                logger.debug("FileFolderProvider discover: scanning. scanned=%s discovered=%s", scanned, len(sources))
             if not file_path.is_file():
                 continue
             if file_path.name.startswith("."):
@@ -36,6 +42,12 @@ class FileFolderProvider:
             sources[rel_path] = "file"
             self._file_sources[rel_path] = file_path
 
+        logger.debug(
+            "FileFolderProvider discover: completed. scanned=%s discovered=%s sources_dir=%s",
+            scanned,
+            len(sources),
+            self._sources_dir,
+        )
         return sources
 
     async def init_record(self, *, source_id: str, now: datetime) -> CacheRecord | None:
@@ -43,6 +55,7 @@ class FileFolderProvider:
         if not file_path:
             return None
 
+        logger.debug("FileFolderProvider init_record: start. source_id=%s path=%s", source_id, file_path)
         try:
             stat = file_path.stat()
         except OSError as e:
@@ -59,6 +72,12 @@ class FileFolderProvider:
             return None
 
         content_hash = hash_text(text)
+        logger.debug(
+            "FileFolderProvider init_record: completed. source_id=%s size_bytes=%s text_chars=%s",
+            source_id,
+            stat.st_size,
+            len(text),
+        )
         return CacheRecord(
             source_type="file",
             content_hash=content_hash,
@@ -70,6 +89,7 @@ class FileFolderProvider:
 
     async def refresh(self, *, cache: CacheState, now: datetime) -> bool:
         changed = False
+        logger.debug("FileFolderProvider refresh: start. known_files=%s", len(self._file_sources))
         for rel_path, file_path in self._file_sources.items():
             record = cache.sources.get(rel_path)
             if record is None:
@@ -90,6 +110,12 @@ class FileFolderProvider:
             if file_meta.size_bytes == stat.st_size and file_meta.mtime_ns == stat.st_mtime_ns:
                 continue
 
+            logger.debug(
+                "FileFolderProvider refresh: changed file detected. rel_path=%s old_size=%s new_size=%s",
+                rel_path,
+                file_meta.size_bytes,
+                stat.st_size,
+            )
             try:
                 text = file_path.read_text(encoding="utf-8")
             except UnicodeDecodeError:
@@ -106,6 +132,7 @@ class FileFolderProvider:
                 record.summary_pending = True
             changed = True
 
+        logger.debug("FileFolderProvider refresh: completed. changed=%s", changed)
         return changed
 
     async def load_text(self, *, source_id: str) -> str | None:
