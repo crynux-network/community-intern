@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal, Optional, Type, TypeVar
+from typing import Literal, Type, TypeVar
 
 from pydantic import BaseModel, ConfigDict
 
@@ -51,20 +51,26 @@ class AIClient:
 
 
 
+class LLMSettings(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    base_url: str
+    api_key: str
+    model: str
+    vram_limit: int
+    structured_output_method: Literal["json_schema", "function_calling"] = "json_schema"
+    timeout_seconds: float
+    max_retries: int
+
+
 class AIConfig(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     # LLM Settings
-    llm_base_url: str
-    llm_api_key: str
-    llm_model: str
-    vram_limit: int
-    structured_output_method: Literal["json_schema", "function_calling"] = "json_schema"
+    llm: LLMSettings
 
     # Timeouts and retries
     graph_timeout_seconds: float
-    llm_timeout_seconds: float
-    max_retries: int
 
     # Workflow policy
     enable_verification: bool = False

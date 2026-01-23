@@ -7,10 +7,10 @@ from langchain_core.runnables import Runnable
 from langchain_crynux import ChatCrynux
 from pydantic import BaseModel
 
-from community_intern.ai.interfaces import AIClient, AIConfig
+from community_intern.ai_response.interfaces import AIClient, AIConfig
 from community_intern.core.models import AIResult, Conversation, RequestContext
 from community_intern.kb.interfaces import KnowledgeBase
-from community_intern.ai.graph import build_ai_graph, GraphState
+from community_intern.ai_response.graph import build_ai_graph, GraphState
 
 logger = logging.getLogger(__name__)
 
@@ -47,14 +47,15 @@ class AIClientImpl(AIClient):
         self._app: Runnable = build_ai_graph(config)
 
         # Shared LLM instance for simple single-step calls
+        llm_config = config.llm
         self._llm = ChatCrynux(
-            base_url=config.llm_base_url,
-            api_key=config.llm_api_key,
-            model=config.llm_model,
-            vram_limit=config.vram_limit,
+            base_url=llm_config.base_url,
+            api_key=llm_config.api_key,
+            model=llm_config.model,
+            vram_limit=llm_config.vram_limit,
             temperature=0.0,
-            request_timeout=config.llm_timeout_seconds,
-            max_retries=config.max_retries,
+            request_timeout=llm_config.timeout_seconds,
+            max_retries=llm_config.max_retries,
         )
 
     @property
@@ -143,11 +144,11 @@ class AIClientImpl(AIClient):
 
         structured_llm = self._llm.with_structured_output(
             response_model,
-            method=self._config.structured_output_method,
+            method=self._config.llm.structured_output_method,
         )
         result = await asyncio.wait_for(
             structured_llm.ainvoke(messages),
-            timeout=self._config.llm_timeout_seconds,
+            timeout=self._config.llm.timeout_seconds,
         )
         if result is None:
             raise RuntimeError("LLM returned null structured output.")

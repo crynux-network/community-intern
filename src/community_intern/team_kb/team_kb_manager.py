@@ -6,7 +6,7 @@ from typing import List
 
 from pydantic import BaseModel, Field
 
-from community_intern.ai.interfaces import AIClient
+from community_intern.ai_response.interfaces import AIClient
 from community_intern.config.models import KnowledgeBaseSettings
 from community_intern.knowledge_cache.indexer import KnowledgeIndexer
 from community_intern.knowledge_cache.providers.file_folder import FileFolderProvider
@@ -114,7 +114,12 @@ class TeamKnowledgeManager:
     def _format_qa_pair_for_llm(self, qa_pair: QAPair) -> str:
         lines = []
         for turn in qa_pair.turns:
-            prefix = "User:" if turn.role == "user" else "Team:"
+            if turn.role == "user":
+                prefix = "User:"
+            elif turn.role == "bot":
+                prefix = "Bot:"
+            else:
+                prefix = "Team:"
             lines.append(f"{prefix} {turn.content}")
         return "\n".join(lines)
 

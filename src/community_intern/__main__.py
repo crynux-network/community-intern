@@ -5,7 +5,8 @@ import asyncio
 import logging
 
 from community_intern.adapters.discord import DiscordBotAdapter
-from community_intern.ai import AIClientImpl
+from community_intern.ai_response import AIClientImpl
+from community_intern.ai_response.interfaces import AIClient, AIConfig
 from community_intern.config import YamlConfigLoader
 from community_intern.config.models import ConfigLoadRequest
 from community_intern.kb.impl import FileSystemKnowledgeBase
@@ -67,6 +68,23 @@ async def _load_config(args: argparse.Namespace):
     return await loader.load(request)
 
 
+def _build_kb_ai_client(
+    config,
+    *,
+    default_ai_client: AIClient | None = None,
+) -> AIClient:
+    if config.kb.llm is None:
+        if default_ai_client is not None:
+            return default_ai_client
+        return AIClientImpl(config=config.ai_response)
+
+    override = config.kb.llm
+    ai_data = config.ai_response.model_dump()
+    ai_data["llm"] = override.model_dump()
+    kb_ai_config = AIConfig.model_validate(ai_data)
+    return AIClientImpl(config=kb_ai_config)
+
+
 async def _run_bot(args: argparse.Namespace) -> None:
     from community_intern.team_kb import QACaptureHandler, TeamKnowledgeManager
 
@@ -75,12 +93,13 @@ async def _run_bot(args: argparse.Namespace) -> None:
     logger.info("Starting application in bot mode. dry_run=%s", config.app.dry_run)
 
     # Initialize AI and KnowledgeBase with circular dependency injection
-    ai_client = AIClientImpl(config=config.ai)
-    kb = FileSystemKnowledgeBase(config=config.kb, ai_client=ai_client)
+    ai_client = AIClientImpl(config=config.ai_response)
+    kb_ai_client = _build_kb_ai_client(config, default_ai_client=ai_client)
+    kb = FileSystemKnowledgeBase(config=config.kb, ai_client=kb_ai_client)
     ai_client.set_kb(kb)
 
     # Initialize team knowledge capture
-    team_kb = TeamKnowledgeManager(config=config.kb, ai_client=ai_client)
+    team_kb = TeamKnowledgeManager(config=config.kb, ai_client=kb_ai_client)
     qa_capture_handler = QACaptureHandler(manager=team_kb)
 
     index_task = asyncio.create_task(kb.build_index())
@@ -113,7 +132,7 @@ async def _init_kb(args: argparse.Namespace) -> None:
     init_logging(config.logging)
     logger.info("Starting knowledge base indexing.")
 
-    ai_client = AIClientImpl(config=config.ai)
+    ai_client = _build_kb_ai_client(config)
     kb = FileSystemKnowledgeBase(config=config.kb, ai_client=ai_client)
     ai_client.set_kb(kb)
 
@@ -128,7 +147,7 @@ async def _init_team_kb(args: argparse.Namespace) -> None:
     init_logging(config.logging)
     logger.info("Starting team knowledge base initialization.")
 
-    ai_client = AIClientImpl(config=config.ai)
+    ai_client = _build_kb_ai_client(config)
     team_kb = TeamKnowledgeManager(config=config.kb, ai_client=ai_client)
 
     await team_kb.regenerate()

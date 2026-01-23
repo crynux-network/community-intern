@@ -10,7 +10,7 @@ from discord.ext import commands
 from community_intern.adapters.discord.handlers import ActionHandler
 from community_intern.adapters.discord.interfaces import DiscordAdapter
 from community_intern.adapters.discord.message_router_cog import MessageRouterCog
-from community_intern.ai.interfaces import AIClient
+from community_intern.ai_response.interfaces import AIClient
 from community_intern.config.models import AppConfig
 
 logger = logging.getLogger(__name__)

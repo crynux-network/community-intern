@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 from typing import Optional, Sequence
 
-from community_intern.ai.interfaces import AIClient
+from community_intern.ai_response.interfaces import AIClient
 from community_intern.config.models import KnowledgeBaseSettings
 from community_intern.kb.interfaces import IndexEntry, SourceContent
 from community_intern.kb.web_fetcher import WebFetcher

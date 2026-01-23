@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from community_intern.ai.interfaces import AIClient
+from community_intern.ai_response.interfaces import AIClient
 
 
 class DiscordAdapter(Protocol):

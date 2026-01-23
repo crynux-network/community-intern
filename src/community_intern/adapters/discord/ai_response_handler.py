@@ -11,7 +11,7 @@ import discord
 
 from community_intern.adapters.discord.handlers import ActionHandler
 from community_intern.adapters.discord.models import GatheredContext, MessageContext
-from community_intern.ai.interfaces import AIClient
+from community_intern.ai_response.interfaces import AIClient
 from community_intern.core.models import Conversation, Message, RequestContext
 
 logger = logging.getLogger(__name__)

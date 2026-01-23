@@ -2,9 +2,9 @@
 
 This project is a LLM powered Discord FAQ bot that automatically monitors one or more Discord channels, detects user questions, and generates high-quality answers using a configured set of documentation sources such as local text files and web links.
 
-When the system decides to respond, it creates a new Discord thread and posts the answer inside the thread. If new messages arrive in a thread that the bot has already answered, the bot sends the full thread context back to the AI module to produce a follow-up answer.
+When the system decides to respond, it creates a new Discord thread and posts the answer inside the thread. If new messages arrive in a thread that the bot has already answered, the bot sends the full thread context back to the AI response module to produce a follow-up answer.
 
-For the AI module, there is no separate "single message" input type: every call receives a `Conversation` that represents a thread context. A new channel message is modeled as a thread context containing exactly one message.
+For the AI response module, there is no separate "single message" input type: every call receives a `Conversation` that represents a thread context. A new channel message is modeled as a thread context containing exactly one message.
 
 ## Library targets
 
@@ -27,12 +27,12 @@ Primary documentation entry points:
 - **Goals**
   - Monitor all Discord channels the bot can read based on Discord permissions and respond to FAQ-like questions using knowledge base as context.
   - Create responses in **threads**, keeping the main channel clean.
-  - Keep the AI module **stateless**: it must not persist chat history; conversation context is provided by the Bot Integration module.
+  - Keep the AI response module **stateless**: it must not persist chat history; conversation context is provided by the Bot Integration module.
   - Support a knowledge base made of:
     - Local text files in a folder
     - Web pages fetched from links stored in files (fetched via headless browser to support dynamic content)
   - Build a lightweight index at startup to help select the right sources quickly.
-  - Make the AI module interface reusable so other platforms such as Telegram can be added later.
+  - Make the AI response module interface reusable so other platforms such as Telegram can be added later.
 
 - **Non-goals**
   - Full conversational memory across threads beyond what the bot sends each call.
@@ -49,26 +49,26 @@ The system is split into three modules:
 ### Data flow, happy path
 
 - A message is posted in a channel the bot can read.
-- The Bot Integration module packages the message into a thread context as a `Conversation` with exactly one message and calls the AI module.
-- The AI module decides whether to respond.
+- The Bot Integration module packages the message into a thread context as a `Conversation` with exactly one message and calls the AI response module.
+- The AI response module decides whether to respond.
   - If **no**, the bot does nothing.
   - If **yes**, the bot creates a thread and posts the AI answer.
-- If the thread receives a new message later, the bot gathers the full thread message list and calls the AI module again for a follow-up answer.
+- If the thread receives a new message later, the bot gathers the full thread message list and calls the AI response module again for a follow-up answer.
 
 ## Module 1: Bot Integration
 
 ### Responsibilities
 
 - Connect to Discord and subscribe to events for all readable channels.
-- Normalize Discord messages and threads into a platform-neutral format for the AI module.
-- This module decides how to package Discord events into a thread context before calling the AI module:
-  - **New channel message** -> call AI module with a thread containing exactly one message
-  - **Thread update**, thread previously answered by bot -> call AI module with the full thread message list
+- Normalize Discord messages and threads into a platform-neutral format for the AI response module.
+- This module decides how to package Discord events into a thread context before calling the AI response module:
+  - **New channel message** -> call AI response module with a thread containing exactly one message
+  - **Thread update**, thread previously answered by bot -> call AI response module with the full thread message list
 - Create threads and post responses.
 
 ### Interfaces
 
-- Bot-to-AI boundary: `src/community_intern/ai/interfaces.py` `AIClient`
+- Bot-to-AI boundary: `src/community_intern/ai_response/interfaces.py` `AIClient`
 - Shared models and result schema: `src/community_intern/core/models.py`
 
 Implementation details for the Bot Integration module live in [`./module-bot-integration.md`](./module-bot-integration.md).
@@ -86,11 +86,11 @@ Implementation details for the Bot Integration module live in [`./module-bot-int
 
 ### Statelessness requirement
 
-The AI module **must not store chat history**. Any required context is provided in the `Conversation` payload for each call.
+The AI response module **must not store chat history**. Any required context is provided in the `Conversation` payload for each call.
 
 ### Workflow
 
-The AI module is implemented as a small LangGraph state graph:
+The AI response module is implemented as a small LangGraph state graph:
 
 1. Question gating
 2. Source selection using KB index
@@ -109,7 +109,7 @@ Full workflow and node specifications are defined in [`./module-ai-response.md`]
   - Links referenced inside those files, HTTP and HTTPS (fetched dynamically via headless browser)
 - On each startup:
   - Build a lightweight index to help select the right sources
-- Provide retrieval helpers to the AI module:
+- Provide retrieval helpers to the AI response module:
   - Provide index text and load source content for selected identifiers
 
 Contracts and examples:
@@ -133,5 +133,5 @@ Details: [`./module-knowledge-base.md`](./module-knowledge-base.md).
 To add a new platform such as Telegram, implement a new integration module that:
 
 - Converts platform events into the shared `Conversation` model
-- Calls the AI module via the same `generate_reply` boundary
+- Calls the AI response module via the same `generate_reply` boundary
 - Posts responses using the platform’s native reply/thread mechanism
