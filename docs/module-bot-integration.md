@@ -7,7 +7,7 @@ The Discord adapter connects to Discord, listens to all channels it can read (ba
 This module owns **all Discord-specific concerns**: intents, permissions, rate limits, thread creation, and unified message routing.
 
 The adapter supports multiple action handlers:
-- **AI Response Handler**: Responds to community user questions via the AI module
+- **AI Response Handler**: Responds to community user questions via the AI response module
 - **Q&A Capture Handler**: Captures team member replies for the knowledge base (see [`module-team-knowledge-capture.md`](./module-team-knowledge-capture.md))
 
 ## Responsibilities
@@ -24,7 +24,7 @@ The adapter supports multiple action handlers:
 ## External dependencies
 
 - `discord.py` (target: 2.6.4)
-- An AI module client implementing `AIClient.generate_reply(...)` (defined below)
+- An AI response module client implementing `AIClient.generate_reply(...)` (defined below)
 
 ## Runtime configuration
 
@@ -53,7 +53,7 @@ The adapter depends on an AI client that exposes a single method and returns a s
 
 See:
 
-- `src/community_intern/ai/interfaces.py` (`AIClient`)
+- `src/community_intern/ai_response/interfaces.py` (`AIClient`)
 
 ---
 
@@ -260,7 +260,7 @@ Where `GatheredContext` contains:
 
 ## AI Response Handler
 
-Handles community user questions by calling the AI module and posting responses.
+Handles community user questions by calling the AI response module and posting responses.
 
 ### Trigger conditions
 
@@ -359,7 +359,7 @@ sequenceDiagram
   participant U as CommunityUser
   participant D as Discord
   participant A as DiscordAdapter
-  participant AI as AIModule
+  participant AI as AIResponseModule
 
   U->>D: Post message in channel
   D->>A: on_message
@@ -399,7 +399,7 @@ sequenceDiagram
   participant T as TeamMember
   participant D as Discord
   participant A as DiscordAdapter
-  participant AI as AIModule
+  participant AI as AIResponseModule
   participant KB as KnowledgeCapture
 
   Note over U,KB: Bot-owned thread: AI responds
@@ -453,7 +453,7 @@ Log fields per handled event:
 - `platform`, `guild_id`, `channel_id`, `thread_id`, `message_id`, `author_id`
 - `author_type`: `community_user` | `team_member` | `bot`
 - `routing`: `ai_response` | `qa_capture` | `ignored`
-- `ai.should_reply` (when applicable)
+- `ai_response.should_reply` (when applicable)
 - `latency_ms`: AI call, Discord API calls
 - `error.type`, `error.message` (if any)
 
@@ -461,8 +461,8 @@ Log fields per handled event:
 
 - `adapter_events_total{type=...}`
 - `adapter_routing_total{handler=ai_response|qa_capture|ignored}`
-- `ai_calls_total{result=success|timeout|error}`
-- `ai_should_reply_total{value=true|false}`
+- `ai_response_calls_total{result=success|timeout|error}`
+- `ai_response_should_reply_total{value=true|false}`
 - `qa_capture_total{result=success|error}`
 - `discord_api_calls_total{endpoint=...}`
 

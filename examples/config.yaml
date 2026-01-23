@@ -13,16 +13,17 @@ discord:
   message_batch_wait_seconds: 60
   team_member_ids: []
 
-ai:
-  llm_base_url: "https://bridge.crynux-as.xyz/v1/llm"
-  llm_api_key: "REPLACE_ME"
-  llm_model: "Qwen/Qwen2.5-7B-Instruct"
-  vram_limit: 24
-  structured_output_method: "json_schema" # "function_calling" if the model does not support native JSON schema structured output
+ai_response:
+  llm:
+    base_url: "https://bridge.crynux-as.xyz/v1/llm"
+    api_key: "REPLACE_ME"
+    model: "Qwen/Qwen2.5-7B-Instruct"
+    vram_limit: 24
+    structured_output_method: "json_schema" # "function_calling" if the model does not support native JSON schema structured output
+    timeout_seconds: 60
+    max_retries: 2
 
   graph_timeout_seconds: 200
-  llm_timeout_seconds: 60
-  max_retries: 2
 
   enable_verification: false
 
@@ -110,6 +111,8 @@ kb:
   index_path: "data/knowledge-base/index.txt"
   index_cache_path: "data/knowledge-base/index-cache.json"
   links_file_path: "data/knowledge-base/links.txt"
+
+  llm: null
 
   web_fetch_timeout_seconds: 30
   web_fetch_cache_dir: "data/knowledge-base/web-cache"

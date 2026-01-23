@@ -5,7 +5,7 @@ from typing import Optional, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from community_intern.ai.interfaces import AIConfig
+from community_intern.ai_response.interfaces import AIConfig, LLMSettings
 
 
 class AppSettings(BaseModel):
@@ -56,6 +56,8 @@ class KnowledgeBaseSettings(BaseModel):
     index_cache_path: str
     links_file_path: str
 
+    llm: Optional[LLMSettings] = None
+
     web_fetch_timeout_seconds: float
     web_fetch_cache_dir: str
 
@@ -99,7 +101,7 @@ class AppConfig(BaseModel):
     app: AppSettings
     logging: LoggingSettings
     discord: DiscordSettings
-    ai: AIConfig
+    ai_response: AIConfig
     kb: KnowledgeBaseSettings
 
 

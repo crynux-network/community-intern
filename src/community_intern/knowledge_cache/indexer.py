@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Iterable, Protocol
 
-from community_intern.ai.interfaces import AIClient, LLMTextResult
+from community_intern.ai_response.interfaces import AIClient, LLMTextResult
 from community_intern.knowledge_cache.io import atomic_write_json, build_index_entries, encode_cache, read_cache_file, write_index_file
 from community_intern.knowledge_cache.models import CacheRecord, CacheState, SchemaVersion, SourceType
 from community_intern.knowledge_cache.utils import format_rfc3339, utc_now

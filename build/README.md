@@ -13,8 +13,8 @@ Create `build/data/.env` and add your secrets.
 ```bash
 $ cat <<'EOF' > build/data/.env
 APP__DISCORD__TOKEN=your_discord_bot_token
-APP__AI__LLM_BASE_URL=https://llm.provider/v1
-APP__AI__LLM_API_KEY=your_llm_api_key
+APP__AI_RESPONSE__LLM__BASE_URL=https://llm.provider/v1
+APP__AI_RESPONSE__LLM__API_KEY=your_llm_api_key
 EOF
 ```
 

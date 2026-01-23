@@ -6,7 +6,7 @@ from typing import List
 
 from pydantic import BaseModel, Field
 
-from community_intern.ai.interfaces import AIClient
+from community_intern.ai_response.interfaces import AIClient
 from community_intern.config.models import KnowledgeBaseSettings
 from community_intern.knowledge_cache.indexer import KnowledgeIndexer
 from community_intern.knowledge_cache.providers.file_folder import FileFolderProvider

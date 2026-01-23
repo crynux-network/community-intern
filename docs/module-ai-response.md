@@ -158,6 +158,8 @@ The module uses `langchain-crynux` (`ChatCrynux`, ChatOpenAI-compatible) for all
 - **Graph workflow**: A `ChatCrynux` instance is created at graph build time and injected into graph nodes
 - **Simple calls**: A shared `ChatCrynux` instance is created at `AIClient` initialization and reused for all direct LLM calls
 
+AI response operations MUST use ChatCrynux configured from `ai_response.llm`.
+
 ## Shared Data Models
 
 See `src/community_intern/core/models.py`. The module relies on:
@@ -166,15 +168,19 @@ See `src/community_intern/core/models.py`. The module relies on:
 
 ## Configuration
 
-The AI module is configured under the `ai` section in `config.yaml`.
+The AI response module is configured under the `ai_response` section in `config.yaml`.
 
 ### Shared Keys (Connection & Resilience)
-- `llm_base_url`: Base URL for the LLM API.
-- `llm_api_key`: API key for the LLM.
-- `llm_model`: Model name to use.
+The `ai_response.llm` object defines:
+- `base_url`: Base URL for the LLM API.
+- `api_key`: API key for the LLM.
+- `model`: Model name to use.
 - `vram_limit`: Minimum GPU VRAM required for the inference run in GB.
-- `llm_timeout_seconds`: Timeout per individual LLM call (network timeout).
+- `structured_output_method`: Structured output mode (`json_schema` or `function_calling`).
+- `timeout_seconds`: Timeout per individual LLM call (network timeout).
 - `max_retries`: Maximum retry attempts for transient failures.
+
+The AI response module MUST use `ai_response.llm` for `generate_reply` and `invoke_llm`. Knowledge Base LLM overrides are configured under `kb.llm` and MUST NOT change AI response behavior.
 
 ### Graph-Specific Keys (`generate_reply`)
 - **Workflow Timeout**: `graph_timeout_seconds` (End-to-end timeout for the entire graph execution).

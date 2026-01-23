@@ -8,7 +8,7 @@ from langchain_crynux import ChatCrynux
 from langgraph.graph import StateGraph, END
 from pydantic import BaseModel, Field
 
-from community_intern.ai.interfaces import AIConfig
+from community_intern.ai_response.interfaces import AIConfig
 from community_intern.core.models import Conversation, RequestContext, AIResult
 from community_intern.kb.interfaces import KnowledgeBase, SourceContent
 
@@ -245,14 +245,15 @@ def build_ai_graph(config: AIConfig) -> Runnable:
     """
 
     # Initialize LLM once
+    llm_config = config.llm
     llm = ChatCrynux(
-        base_url=config.llm_base_url,
-        api_key=config.llm_api_key,
-        model=config.llm_model,
-        vram_limit=config.vram_limit,
+        base_url=llm_config.base_url,
+        api_key=llm_config.api_key,
+        model=llm_config.model,
+        vram_limit=llm_config.vram_limit,
         temperature=0.0,
-        request_timeout=config.llm_timeout_seconds,
-        max_retries=config.max_retries,
+        request_timeout=llm_config.timeout_seconds,
+        max_retries=llm_config.max_retries,
     )
 
     workflow = StateGraph(GraphState)

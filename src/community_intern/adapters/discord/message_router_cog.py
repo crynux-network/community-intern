@@ -14,7 +14,7 @@ from community_intern.adapters.discord.classifier import MessageClassifier
 from community_intern.adapters.discord.context_gatherer import ContextGatherer
 from community_intern.adapters.discord.handlers import ActionHandler
 from community_intern.adapters.discord.models import GatheredContext
-from community_intern.ai.interfaces import AIClient
+from community_intern.ai_response.interfaces import AIClient
 from community_intern.config.models import DiscordSettings
 
 logger = logging.getLogger(__name__)

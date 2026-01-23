@@ -34,7 +34,8 @@ Mapping rules:
 Example mappings:
 
 - `APP__DISCORD__TOKEN` -> `discord.token`
-- `APP__AI__GRAPH_TIMEOUT_SECONDS` -> `ai.graph_timeout_seconds`
+- `APP__AI_RESPONSE__GRAPH_TIMEOUT_SECONDS` -> `ai_response.graph_timeout_seconds`
+- `APP__AI_RESPONSE__LLM__API_KEY` -> `ai_response.llm.api_key`
 - `APP__KB__SOURCES_DIR` -> `kb.sources_dir`
 
 ## Environment variable value parsing
@@ -51,12 +52,12 @@ See the example config file: `examples/config.yaml`.
 
 Related contract types:
 
-- `src/community_intern/ai/interfaces.py` (`AIConfig`)
+- `src/community_intern/ai_response/interfaces.py` (`AIConfig`)
 - `src/community_intern/config/models.py` (`AppConfig`, `DiscordSettings`, `KnowledgeBaseSettings`)
 
-## AI structured output method
+## AI Response structured output method
 
-`ai.structured_output_method` controls how the application enforces structured outputs when using `with_structured_output()`.
+`ai_response.llm.structured_output_method` controls how the application enforces structured outputs when using `with_structured_output()`.
 
 Allowed values:
 

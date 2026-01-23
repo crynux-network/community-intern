@@ -79,17 +79,18 @@ Start from [`./examples/config.yaml`](./examples/config.yaml) and copy it to `da
 
 ```yaml
 # Any OpenAI-compatible chat completion API could be used
-ai:
-  llm_base_url: "https://bridge.crynux-as.xyz/v1/llm"
-  llm_model: "Qwen/Qwen2.5-7B-Instruct"
-  vram_limit: 24  # Required for Crynux when using larger models: minimum GPU VRAM (GB) for inference
+ai_response:
+  llm:
+    base_url: "https://bridge.crynux-as.xyz/v1/llm"
+    model: "Qwen/Qwen2.5-7B-Instruct"
+    vram_limit: 24  # Required for Crynux when using larger models: minimum GPU VRAM (GB) for inference
 ```
 
 **Prompt configuration**
 
 Prompts are configured in two sections of `data/config/config.yaml`:
 
-The `ai` section configures the Q&A workflow:
+The `ai_response` section configures the Q&A workflow:
 
 - `project_introduction`: A shared domain introduction appended to multiple prompt steps. This text strongly influences what the bot considers in scope.
 - `gating_prompt`: Decides whether the bot should reply at all.
@@ -125,7 +126,7 @@ Create a `.env` file at `data/.env` to store sensitive keys.
 
 ```bash
 APP__DISCORD__TOKEN=your_discord_bot_token
-APP__AI__LLM_API_KEY=your_llm_api_key
+APP__AI_RESPONSE__LLM__API_KEY=your_llm_api_key
 ```
 
 Notes:

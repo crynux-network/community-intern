@@ -15,13 +15,13 @@ When a configured team member replies to another user's message via Discord repl
 The module captures knowledge from team member replies in Discord and makes it available as a source for the Knowledge Base module (see `module-knowledge-base.md`):
 - When a team member replies to a user's question, the Q&A exchange is captured
 - The captured knowledge is organized into topic-indexed documents
-- These documents serve as additional sources for the AI to answer future user questions
+- These documents serve as additional sources for the AI response module to answer future user questions
 - The Knowledge Base module can select and load these documents just like other KB sources
 
 ### F2: Team Member Handling
 
 Messages from configured team member Discord accounts receive special handling:
-- Team member messages do not trigger the AI reply workflow
+- Team member messages do not trigger the AI response workflow
 - When a team member replies to a community user (via Discord reply or thread), the Q&A exchange is captured for the knowledge base
 - Bot messages are not stored in the team knowledge base
 
@@ -82,12 +82,13 @@ When adding a Q&A pair to a topic file, the LLM decides how to integrate it:
 
 ### LLM Integration
 
-The Team Knowledge module uses the AI module's `invoke_llm` interface for LLM operations (see `module-ai-response.md`):
+The Team Knowledge module uses the AI response module's `invoke_llm` interface for LLM operations (see `module-ai-response.md`):
 
 - Calls `AIClient.invoke_llm` with a system prompt and Pydantic response model
 - Prompts are configured in the `kb` section of the config file
 - Uses `with_structured_output` for automatic JSON schema and validation
-- Appends `project_introduction` from AI config to all LLM calls
+- Appends `project_introduction` from AI response config to all LLM calls
+- LLM calls MUST use ChatCrynux with `kb.llm` when configured, otherwise they MUST use `ai_response.llm`
 
 LLM responses are kept minimal to reduce token usage and improve reliability:
 
@@ -379,6 +380,7 @@ This module adds:
 ```yaml
 kb:
   # ... other kb config ...
+  llm: null
   team_raw_dir: "data/team-knowledge/raw"
   team_topics_dir: "data/team-knowledge/topics"
   team_index_path: "data/team-knowledge/index-team.txt"
@@ -552,7 +554,7 @@ Module boundaries:
 ## Dependencies
 
 - Discord adapter ([`module-bot-integration.md`](./module-bot-integration.md)): This module implements `QACaptureHandler`; the adapter provides message classification, context gathering, and routing
-- AI module ([`module-ai-response.md`](./module-ai-response.md)): Provides LLM calls for classification, integration, and index summarization via a shared `ChatCrynux` instance.
+- AI response module ([`module-ai-response.md`](./module-ai-response.md)): Provides LLM calls for classification, integration, and index summarization via a shared `ChatCrynux` instance.
 - Shared cache modules:
   - `src/community_intern/knowledge_cache/utils.py`
   - `src/community_intern/knowledge_cache/io.py`
