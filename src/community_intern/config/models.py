@@ -46,6 +46,7 @@ class DiscordSettings(BaseModel):
 
     token: str
     message_batch_wait_seconds: float
+    message_grouping_window_seconds: float = 300.0
     team_member_ids: Sequence[str] = ()
 
 
@@ -85,6 +86,10 @@ class KnowledgeBaseSettings(BaseModel):
     team_integration_prompt: str
     team_summarization_prompt: str
     team_image_summary_prompt: str
+
+    # Team knowledge state
+    team_state_path: str = "data/team-knowledge/state.json"
+    team_start_qa_timestamp: str = ""
 
 
 class AppConfig(BaseModel):
