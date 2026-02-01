@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal, Sequence
 
+from pydantic import BaseModel, Field
+
 
 @dataclass(slots=True)
 class Turn:
@@ -36,6 +38,5 @@ class IntegrationResult:
     remove_ids: list[str] = field(default_factory=list)
 
 
-@dataclass(slots=True)
-class TeamKBState:
-    last_processed_qa_id: str = ""
+class TeamKBState(BaseModel):
+    last_processed_qa_id: str = Field(default="")

@@ -401,6 +401,7 @@ kb:
   team_topics_dir: "data/team-knowledge/topics"
   team_index_path: "data/team-knowledge/index-team.txt"
   team_index_cache_path: "data/team-knowledge/index-team-cache.json"
+  team_start_qa_timestamp: ""
 
   team_classification_prompt: |
     You are a topic classifier for a team knowledge base.
@@ -420,6 +421,17 @@ kb:
     Summarize key information from images in the context of the team conversation.
     ...
 ```
+
+### Start Timestamp Behavior
+
+`team_start_qa_timestamp` lets operators choose the first raw QA pair to process.
+
+Rules:
+- The value must match a raw QA pair `timestamp` value
+- On startup, the system computes a threshold ID for this timestamp
+- The system compares the threshold ID with `state.json` and uses whichever is newer
+- If `state.json` is missing or older, processing starts from the configured timestamp
+- If `state.json` is newer, processing starts from `state.json`
 
 ---
 

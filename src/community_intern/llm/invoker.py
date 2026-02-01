@@ -81,6 +81,10 @@ class LLMInvoker:
         )
         if result is None:
             raise RuntimeError("LLM returned null structured output.")
+
+        if isinstance(result, response_model):
+            return result
+
         try:
             return response_model.model_validate(result)
         except Exception as exc:

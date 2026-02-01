@@ -49,20 +49,24 @@ def parse_raw_file(content: str) -> list[QAPair]:
         turns: list[Turn] = []
 
         for line in lines:
-            line = line.strip()
-            if line.startswith("timestamp:"):
-                timestamp = line[len("timestamp:"):].strip()
-            elif line.startswith("conversation_id:"):
-                conversation_id = line[len("conversation_id:"):].strip()
-            elif line.startswith("message_ids:"):
-                ids_str = line[len("message_ids:"):].strip()
+            stripped_line = line.strip()
+            if stripped_line.startswith("timestamp:"):
+                timestamp = stripped_line[len("timestamp:"):].strip()
+            elif stripped_line.startswith("conversation_id:"):
+                conversation_id = stripped_line[len("conversation_id:"):].strip()
+            elif stripped_line.startswith("message_ids:"):
+                ids_str = stripped_line[len("message_ids:"):].strip()
                 message_ids = [mid.strip() for mid in ids_str.split(",") if mid.strip()]
-            elif line.startswith("User:"):
-                turns.append(Turn(role="user", content=line[len("User:") :].strip()))
-            elif line.startswith("Team:"):
-                turns.append(Turn(role="team", content=line[len("Team:") :].strip()))
-            elif line.startswith("Bot:"):
-                turns.append(Turn(role="bot", content=line[len("Bot:") :].strip()))
+            elif stripped_line.startswith("User:"):
+                turns.append(Turn(role="user", content=stripped_line[len("User:") :].strip()))
+            elif stripped_line.startswith("Team:"):
+                turns.append(Turn(role="team", content=stripped_line[len("Team:") :].strip()))
+            elif stripped_line.startswith("Bot:"):
+                turns.append(Turn(role="bot", content=stripped_line[len("Bot:") :].strip()))
+            elif turns:
+                # If the line doesn't start with a known prefix, it's a continuation of the previous turn
+                # We use rstrip() to preserve indentation but remove trailing whitespace
+                turns[-1].content += "\n" + line.rstrip()
 
         if timestamp and turns:
             qa_id = f"qa_{timestamp.replace('-', '').replace(':', '').replace('T', '_').replace('Z', '')}"
@@ -188,11 +192,11 @@ class RawArchive:
 
         start_week_file = get_week_filename(last_dt)
         files = sorted(self._raw_dir.glob("*.txt"))
-        
+
         # Filter files that might contain newer entries
         # Since files are named YYYY-WWW, string comparison works
         relevant_files = [f for f in files if f.name >= start_week_file]
-        
+
         if not relevant_files:
             return []
 
@@ -207,9 +211,9 @@ class RawArchive:
 
         # Filter strictly newer pairs
         filtered = [p for p in all_pairs if p.id > last_processed_qa_id]
-        
+
         if filtered:
             # Deduplicate to ensure we only process the most complete version of any new conversations
             filtered = deduplicate_by_conversation(filtered)
-            
+
         return filtered
