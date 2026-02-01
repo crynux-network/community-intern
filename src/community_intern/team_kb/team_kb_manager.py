@@ -31,7 +31,7 @@ class ClassificationResult(BaseModel):
         default=False,
         description="If true, the Q&A pair lacks sufficient information and should not be added to any topic",
     )
-    topic_name: str = Field(
+    topic_name: str | None = Field(
         default="",
         description="Topic identifier (e.g., 'node-startup-issues'). Empty when skip is true.",
     )
@@ -180,13 +180,10 @@ class TeamKnowledgeManager:
         topic_name = result.topic_name
         if not topic_name:
             logger.warning(
-                "Classification returned empty topic_name without skip=true. qa_id=%s",
+                "Classification returned empty topic_name without skip=true. qa_id=%s. Treating as skip.",
                 qa_pair.id,
             )
-            # Treat this as a failure to prevent marking as processed if it's a transient issue?
-            # Or logic error? If logic error, retrying won't help.
-            # But let's raise error so it retries or requires manual intervention.
-            raise ValueError(f"Empty topic_name for qa_id={qa_pair.id}")
+            return
 
         logger.debug(
             "Topic classification result. qa_id=%s topic_name=%s",
@@ -301,19 +298,21 @@ class TeamKnowledgeManager:
         # Apply manual start timestamp from config if present
         config_timestamp = self._config.team_start_qa_timestamp.strip()
         if config_timestamp:
-            # Generate ID from timestamp to compare with stored state
-            # We want to start processing FROM this timestamp (inclusive),
-            # so we set the last_processed_id to effectively "just before" this timestamp.
-            config_start_id = self._generate_qa_id(config_timestamp)
-            
-            # Decrement last character to create a threshold ID that is strictly less than
-            # the target ID, ensuring the target ID is picked up by "load_since(threshold)".
-            if config_start_id:
-                last_char = config_start_id[-1]
-                # This works because IDs end in digits (0-9), and decrementing '0' gives '/'
-                # which is a valid character for string comparison and sorts before '0'.
-                config_threshold_id = config_start_id[:-1] + chr(ord(last_char) - 1)
-                
+            try:
+                from datetime import datetime, timedelta
+                # Parse the timestamp to subtract 1 second, ensuring a valid ID format
+                # that RawArchive.load_since can parse without error.
+                ts_str = config_timestamp.replace("Z", "+00:00")
+                dt = datetime.fromisoformat(ts_str)
+                dt_prev = dt - timedelta(seconds=1)
+
+                # Format back to our ID style
+                # We need to match _generate_qa_id logic:
+                # clean = timestamp.replace("-", "").replace(":", "").replace("T", "_").replace("Z", "")
+                # So we format to ISO first.
+                iso = dt_prev.isoformat().replace("+00:00", "Z")
+                config_threshold_id = self._generate_qa_id(iso)
+
                 if config_threshold_id > state.last_processed_qa_id:
                     logger.info(
                         "Using configured team_start_qa_timestamp as override. stored=%s config_ts=%s threshold=%s",
@@ -322,6 +321,12 @@ class TeamKnowledgeManager:
                         config_threshold_id,
                     )
                     state.last_processed_qa_id = config_threshold_id
+            except Exception:
+                logger.warning(
+                    "Failed to parse team_start_qa_timestamp for threshold calculation. config_ts=%s",
+                    config_timestamp,
+                    exc_info=True
+                )
 
         return state
 
