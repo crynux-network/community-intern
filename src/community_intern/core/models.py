@@ -19,12 +19,23 @@ class ImageInput:
 
 
 @dataclass(frozen=True, slots=True)
+class AttachmentInput:
+    url: str
+    mime_type: Optional[str]
+    filename: Optional[str]
+    size_bytes: Optional[int]
+    source: Optional[str]
+    is_image: bool
+
+
+@dataclass(frozen=True, slots=True)
 class Message:
     role: Role
     text: str
     timestamp: datetime
     author_id: Optional[str]
     images: Optional[Sequence[ImageInput]] = None
+    attachments: Optional[Sequence[AttachmentInput]] = None
 
 
 @dataclass(frozen=True, slots=True)

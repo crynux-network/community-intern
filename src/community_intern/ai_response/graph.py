@@ -1,6 +1,6 @@
 import logging
 from functools import partial
-from typing import Any, Dict, List, Optional, TYPE_CHECKING, TypedDict
+from typing import Any, Dict, List, Optional, Sequence, TYPE_CHECKING, TypedDict
 
 from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_core.runnables import Runnable
@@ -10,9 +10,10 @@ from pydantic import BaseModel, Field
 
 from community_intern.ai_response.config import AIConfig
 from community_intern.llm.image_adapters import ContentPart, ImagePart, LLMImageAdapter, TextPart
-from community_intern.core.models import Conversation, RequestContext, AIResult
+from community_intern.core.models import AttachmentInput, Conversation, ImageInput, Message, RequestContext, AIResult
 from community_intern.kb.interfaces import KnowledgeBase, SourceContent
 from community_intern.llm.prompts import compose_system_prompt
+from community_intern.core.formatters import format_message_as_text, format_conversation_as_text
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +74,10 @@ def _build_user_message(
     return HumanMessage(content=content)
 
 
+
+
+
+
 async def node_gating(
     state: GraphState, *, llm: "ChatOpenAI", image_adapter: LLMImageAdapter
 ) -> Dict[str, Any]:
@@ -80,7 +85,11 @@ async def node_gating(
     conversation = state["conversation"]
     parts = state.get("user_parts", [])
 
-    last_msg = conversation.messages[-1].text if conversation.messages else ""
+    last_msg = format_message_as_text(conversation.messages[-1]) if conversation.messages else ""
+    if last_msg:
+        last_msg = "\n".join(last_msg)
+    else:
+        last_msg = ""
     if not last_msg and parts:
         last_msg = "User provided images without additional text."
 
@@ -89,6 +98,8 @@ async def node_gating(
         method=config.llm.structured_output_method,
     )
 
+    history_text = format_conversation_as_text(conversation)
+    history_block = f"Conversation history:\n{history_text}\n\n" if history_text else ""
     messages = [
         SystemMessage(
             content=compose_system_prompt(
@@ -97,7 +108,7 @@ async def node_gating(
             )
         ),
         _build_user_message(
-            text=f"User input: {last_msg}",
+            text=f"{history_block}User input: {last_msg}",
             parts=parts,
             adapter=image_adapter,
             enable_images=config.llm_enable_image,
@@ -124,6 +135,7 @@ async def node_selection(
     config = state["config"]
     kb = state["kb"]
     query = state["user_question"]
+    conversation = state["conversation"]
     parts = state.get("user_parts", [])
     if not query and parts:
         query = "User provided images without additional text."
@@ -139,15 +151,22 @@ async def node_selection(
         method=config.llm.structured_output_method,
     )
 
+    history_text = format_conversation_as_text(conversation)
+    history_block = f"Conversation history:\n{history_text}\n\n" if history_text else ""
+    # Append max_sources instruction to the base prompt
+    base_prompt = config.selection_prompt
+    if config.max_sources > 0:
+        base_prompt = f"{base_prompt.strip()}\n\nSelect at most {config.max_sources} sources."
+
     messages = [
         SystemMessage(
             content=compose_system_prompt(
-                base_prompt=config.selection_prompt,
+                base_prompt=base_prompt,
                 project_introduction=config.project_introduction,
             )
         ),
         _build_user_message(
-            text=f"Index:\n{kb_index_text}\n\nQuery: {query}",
+            text=f"{history_block}Index:\n{kb_index_text}\n\nQuery: {query}",
             parts=parts,
             adapter=image_adapter,
             enable_images=config.llm_enable_image,
@@ -190,6 +209,7 @@ async def node_generation(
     config = state["config"]
     loaded = state["loaded_sources"]
     query = state["user_question"]
+    conversation = state["conversation"]
     parts = state.get("user_parts", [])
     if not query and parts:
         query = "User provided images without additional text."
@@ -201,6 +221,8 @@ async def node_generation(
         method=config.llm.structured_output_method,
     )
 
+    history_text = format_conversation_as_text(conversation)
+    history_block = f"Conversation history:\n{history_text}\n\n" if history_text else ""
     messages = [
         SystemMessage(
             content=compose_system_prompt(
@@ -209,7 +231,7 @@ async def node_generation(
             )
         ),
         _build_user_message(
-            text=f"Context:\n{sources_text}\n\nQuestion: {query}",
+            text=f"{history_block}Context:\n{sources_text}\n\nQuestion: {query}",
             parts=parts,
             adapter=image_adapter,
             enable_images=config.llm_enable_image,
@@ -219,7 +241,9 @@ async def node_generation(
     try:
         result: LLMGenerationResult = await structured_llm.ainvoke(messages)
         answer = (result.answer or "").strip()
-        if not answer:
+        # Fix: Some models return the literal string "null" or "Null" when instructed to return null.
+        # We treat this as an empty answer.
+        if not answer or answer.lower() == "null":
             return {"draft_answer": "", "should_reply": False}
         if not config.enable_verification:
             return {
@@ -240,6 +264,7 @@ async def node_verification(
     config = state["config"]
     draft = state["draft_answer"]
     loaded = state["loaded_sources"]
+    conversation = state["conversation"]
     parts = state.get("user_parts", [])
 
     sources_text = "\n\n".join([f"Source: {s.source_id}\nContent:\n{s.text}" for s in loaded])
@@ -249,6 +274,8 @@ async def node_verification(
         method=config.llm.structured_output_method,
     )
 
+    history_text = format_conversation_as_text(conversation)
+    history_block = f"Conversation history:\n{history_text}\n\n" if history_text else ""
     messages = [
         SystemMessage(
             content=compose_system_prompt(
@@ -257,7 +284,7 @@ async def node_verification(
             )
         ),
         _build_user_message(
-            text=f"Context:\n{sources_text}\n\nDraft Answer: {draft}",
+            text=f"{history_block}Context:\n{sources_text}\n\nDraft Answer: {draft}",
             parts=parts,
             adapter=image_adapter,
             enable_images=config.llm_enable_image,

@@ -11,7 +11,12 @@ from pydantic import BaseModel, Field
 from community_intern.adapters.discord.handlers import ActionHandler
 from community_intern.adapters.discord.classifier import MessageClassifier
 from community_intern.adapters.discord.models import GatheredContext, MessageContext
-from community_intern.llm.image_transport import download_images_as_base64
+from community_intern.adapters.discord.utils import (
+    extract_image_inputs,
+    download_image_inputs,
+    is_image_attachment,
+)
+from community_intern.core.formatters import format_attachment_placeholder
 from community_intern.llm.prompts import compose_system_prompt
 from community_intern.core.models import ImageInput
 from community_intern.knowledge_cache.utils import format_rfc3339
@@ -21,20 +26,6 @@ if TYPE_CHECKING:
     from community_intern.team_kb.team_kb_manager import TeamKnowledgeManager
 
 logger = logging.getLogger(__name__)
-
-_IMAGE_EXTENSIONS = {
-    ".png",
-    ".jpg",
-    ".jpeg",
-    ".gif",
-    ".webp",
-    ".bmp",
-    ".tif",
-    ".tiff",
-    ".heic",
-    ".heif",
-    ".avif",
-}
 
 
 class ImageSummaryItem(BaseModel):
@@ -189,19 +180,11 @@ class QACaptureHandler(ActionHandler):
             if author_type == "community_user":
                 role = "user"
             elif author_type == "bot":
-                continue
+                role = "bot"
             else:
                 role = "team"
-            text = (msg.content or "").strip()
             summaries = image_summaries.get(str(msg.id), [])
-            if summaries:
-                summaries.sort(key=lambda item: item[0])
-                summary_lines = [f"Image summary ({idx}): {summary}" for idx, summary in summaries]
-                if text:
-                    text = f"{text}\n" + "\n".join(summary_lines)
-                else:
-                    text = "\n".join(summary_lines)
-
+            text = _build_message_text_with_summaries(msg, summaries=summaries)
             if text:
                 turns.append(Turn(role=role, content=text))
                 message_ids.append(str(msg.id))
@@ -229,39 +212,23 @@ class QACaptureHandler(ActionHandler):
             if group.author_type == "community_user":
                 role = "user"
             elif group.author_type == "bot":
-                continue
+                role = "bot"
             else:
                 role = "team"
             for msg in group.messages:
-                text = (msg.content or "").strip()
                 summaries = image_summaries.get(str(msg.id), [])
-                if summaries:
-                    summaries.sort(key=lambda item: item[0])
-                    summary_lines = [f"Image summary ({idx}): {summary}" for idx, summary in summaries]
-                    if text:
-                        text = f"{text}\n" + "\n".join(summary_lines)
-                    else:
-                        text = "\n".join(summary_lines)
+                text = _build_message_text_with_summaries(msg, summaries=summaries)
                 if text:
                     turns.append(Turn(role=role, content=text))
                     message_ids.append(str(msg.id))
 
         for msg in gathered_context.batch:
-            text = (msg.content or "").strip()
             summaries = image_summaries.get(str(msg.id), [])
-            if summaries:
-                summaries.sort(key=lambda item: item[0])
-                summary_lines = [f"Image summary ({idx}): {summary}" for idx, summary in summaries]
-                if text:
-                    text = f"{text}\n" + "\n".join(summary_lines)
-                else:
-                    text = "\n".join(summary_lines)
+            text = _build_message_text_with_summaries(msg, summaries=summaries)
             if text:
                 if msg.author is not None and self._classifier is not None:
                     author_type = self._classifier.classify_author(msg.author.id)
-                    if author_type == "bot":
-                        continue
-                    role = "team"
+                    role = "bot" if author_type == "bot" else "team"
                 else:
                     role = "team"
                 turns.append(Turn(role=role, content=text))
@@ -269,15 +236,8 @@ class QACaptureHandler(ActionHandler):
 
         if not turns and gathered_context.reply_target_message is not None:
             target = gathered_context.reply_target_message
-            target_text = (target.content or "").strip()
             summaries = image_summaries.get(str(target.id), [])
-            if summaries:
-                summaries.sort(key=lambda item: item[0])
-                summary_lines = [f"Image summary ({idx}): {summary}" for idx, summary in summaries]
-                if target_text:
-                    target_text = f"{target_text}\n" + "\n".join(summary_lines)
-                else:
-                    target_text = "\n".join(summary_lines)
+            target_text = _build_message_text_with_summaries(target, summaries=summaries)
             if target_text:
                 turns.append(Turn(role="user", content=target_text))
                 message_ids.append(str(target.id))
@@ -323,12 +283,12 @@ class QACaptureHandler(ActionHandler):
     async def _summarize_images(self, messages: list[discord.Message]) -> dict[str, list[tuple[int, str]]]:
         image_items: list[tuple[str, int, ImageInput]] = []
         for msg in messages:
-            inputs = _extract_image_inputs(msg)
+            inputs = extract_image_inputs(msg)
             if not inputs:
                 continue
             msg_id = str(msg.id)
             try:
-                images_with_payload = await _download_image_inputs(
+                images_with_payload = await download_image_inputs(
                     inputs,
                     timeout_seconds=self._image_download_timeout_seconds,
                     max_retries=self._image_download_max_retries,
@@ -378,65 +338,6 @@ class QACaptureHandler(ActionHandler):
         return summaries
 
 
-def _extract_image_inputs(message: discord.Message) -> list[ImageInput]:
-    images: list[ImageInput] = []
-    for attachment in message.attachments:
-        content_type = attachment.content_type
-        is_image = False
-        if content_type:
-            is_image = content_type.startswith("image/")
-        elif attachment.filename:
-            lower = attachment.filename.lower()
-            for ext in _IMAGE_EXTENSIONS:
-                if lower.endswith(ext):
-                    is_image = True
-                    break
-        if not is_image:
-            continue
-        images.append(
-            ImageInput(
-                url=attachment.url,
-                mime_type=content_type,
-                filename=attachment.filename,
-                size_bytes=attachment.size,
-                source="discord",
-            )
-        )
-    return images
-
-
-async def _download_image_inputs(
-    images: list[ImageInput],
-    *,
-    timeout_seconds: float,
-    max_retries: int,
-) -> list[ImageInput]:
-    if not images:
-        return []
-    base64_images = await download_images_as_base64(
-        images,
-        timeout_seconds=timeout_seconds,
-        max_retries=max_retries,
-    )
-    by_url = {img.source_url: img for img in base64_images}
-    enriched: list[ImageInput] = []
-    for image in images:
-        payload = by_url.get(image.url)
-        if payload is None:
-            continue
-        enriched.append(
-            ImageInput(
-                url=image.url,
-                mime_type=payload.mime_type or image.mime_type,
-                filename=image.filename,
-                size_bytes=image.size_bytes,
-                source=image.source,
-                base64_data=payload.base64_data,
-            )
-        )
-    return enriched
-
-
 def _format_conversation_context(
     messages: list[discord.Message],
     *,
@@ -450,11 +351,61 @@ def _format_conversation_context(
         if author_type == "community_user":
             role = "User"
         elif author_type == "bot":
-            role = "Bot"
+            role = "You"
         else:
             role = "Team"
-        content = (msg.content or "").strip()
-        if not content:
-            content = "Image-only message."
-        lines.append(f"{role}({msg.id}): {content}")
+        content_lines: list[str] = []
+        raw_content = (msg.content or "").strip()
+        if raw_content:
+            content_lines.append(raw_content)
+        content_lines.extend(_build_non_image_attachment_placeholders(msg))
+        if not content_lines and any(is_image_attachment(att) for att in msg.attachments):
+            content_lines.append("Image-only message.")
+        if content_lines:
+            lines.append(f"{role}: {'\\n'.join(content_lines)}")
     return "\n".join(lines).strip()
+
+
+def _build_message_text_with_summaries(
+    message: discord.Message,
+    *,
+    summaries: list[tuple[int, str]],
+) -> str:
+    lines: list[str] = []
+    raw_text = (message.content or "").strip()
+    if raw_text:
+        lines.append(raw_text)
+    summary_map = {idx: summary for idx, summary in summaries}
+    attachment_lines: list[str] = []
+    image_index = 0
+    if message.attachments:
+        for attachment in message.attachments:
+            if is_image_attachment(attachment):
+                image_index += 1
+                summary = summary_map.get(image_index, "").strip()
+                if summary:
+                    attachment_lines.append(f"Image summary ({image_index}): {summary}")
+            else:
+                attachment_lines.append(
+                    format_attachment_placeholder(attachment.filename, is_image=False)
+                )
+    elif summaries:
+        for idx, summary in sorted(summaries, key=lambda item: item[0]):
+            summary_text = summary.strip()
+            if summary_text:
+                attachment_lines.append(f"Image summary ({idx}): {summary_text}")
+    lines.extend(attachment_lines)
+    return "\n".join(lines).strip()
+
+
+def _build_non_image_attachment_placeholders(message: discord.Message) -> list[str]:
+    placeholders: list[str] = []
+    for attachment in message.attachments:
+        if is_image_attachment(attachment):
+            continue
+        placeholders.append(
+            format_attachment_placeholder(attachment.filename, is_image=False)
+        )
+    return placeholders
+
+
