@@ -219,7 +219,9 @@ async def node_generation(
     try:
         result: LLMGenerationResult = await structured_llm.ainvoke(messages)
         answer = (result.answer or "").strip()
-        if not answer:
+        # Fix: Some models return the literal string "null" or "Null" when instructed to return null.
+        # We treat this as an empty answer.
+        if not answer or answer.lower() == "null":
             return {"draft_answer": "", "should_reply": False}
         if not config.enable_verification:
             return {

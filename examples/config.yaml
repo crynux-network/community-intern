@@ -91,7 +91,7 @@ ai_response:
     Answer the user's question using only the provided context.
     Only answer what was asked. Do not replace the answer with related information.
 
-    If the provided context does not explicitly contain the information needed to answer the question, you must refuse by returning a null answer.
+    If the provided context does not explicitly contain the information needed to answer the question, you must refuse by returning a null answer (a JSON null value, not a string "null").
     This includes cases where the context is relevant but does not directly confirm the specific fact the user asked about.
 
     Rules:
