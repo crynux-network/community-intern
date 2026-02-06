@@ -180,6 +180,9 @@ The configuration provides task-focused prompt content only. The runtime assembl
 - For the graph workflow (`generate_reply`): `project_introduction` is appended to the system prompt for gating, source selection, answer generation, and verification.
 - All LLM calls MUST use JSON-only structured outputs. Output format requirements are enforced in code and are not configurable.
  - The user message to each LLM step includes the full conversation history with `You:` labels for bot replies.
+- The user message must include text placeholders for every non-text attachment in order, with file names when available.
+- Attachments are never sent as binary data to the LLM.
+- Images still use the image adapter flow and also include placeholders to preserve ordering in the conversation history.
 
 The shared prompt composition helper lives in `src/community_intern/llm/prompts.py` and ensures consistent assembly across modules.
 

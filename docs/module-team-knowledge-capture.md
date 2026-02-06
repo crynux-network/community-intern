@@ -163,6 +163,8 @@ This handler transforms the gathered context into Q&A pairs:
 | Answer extraction | The team member's `batch` messages |
 | Multi-turn handling | When user asks → team answers → user follows up → team answers again, all messages form a single Q&A pair with alternating Q/A sections |
 
+**Attachment handling**: For each non-text attachment in the gathered context, inject a placeholder line into the corresponding message text. Include the file name when available and preserve the original message order.
+
 **Extraction priority**:
 1. If `thread_history` is available (message is in a thread), use thread history to extract the full conversation
 2. Otherwise, use `reply_chain` for direct reply scenarios

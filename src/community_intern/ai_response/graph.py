@@ -1,6 +1,6 @@
 import logging
 from functools import partial
-from typing import Any, Dict, List, Optional, TYPE_CHECKING, TypedDict
+from typing import Any, Dict, List, Optional, Sequence, TYPE_CHECKING, TypedDict
 
 from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_core.runnables import Runnable
@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 
 from community_intern.ai_response.config import AIConfig
 from community_intern.llm.image_adapters import ContentPart, ImagePart, LLMImageAdapter, TextPart
-from community_intern.core.models import Conversation, RequestContext, AIResult
+from community_intern.core.models import AttachmentInput, Conversation, ImageInput, Message, RequestContext, AIResult
 from community_intern.kb.interfaces import KnowledgeBase, SourceContent
 from community_intern.llm.prompts import compose_system_prompt
 
@@ -75,12 +75,9 @@ def _build_user_message(
 def _format_conversation_history(conversation: Conversation) -> str:
     lines: list[str] = []
     for msg in conversation.messages:
-        text = (msg.text or "").strip()
+        text = _format_message_text(msg)
         if not text:
-            if msg.images:
-                text = "Image-only message."
-            else:
-                continue
+            continue
         if msg.role == "user":
             role = "User"
         elif msg.role == "assistant":
@@ -91,6 +88,39 @@ def _format_conversation_history(conversation: Conversation) -> str:
     return "\n".join(lines).strip()
 
 
+def _format_message_text(msg: Message) -> str:
+    text_lines: list[str] = []
+    raw_text = (msg.text or "").strip()
+    if raw_text:
+        text_lines.append(raw_text)
+    if msg.attachments:
+        for attachment in msg.attachments:
+            text_lines.append(_attachment_placeholder_line(attachment))
+    if not text_lines and msg.images:
+        for line in _build_image_placeholders_from_images(msg.images):
+            text_lines.append(line)
+    return "\n".join(text_lines).strip()
+
+
+def _build_image_placeholders_from_images(images: Sequence[ImageInput]) -> list[str]:
+    placeholders: list[str] = []
+    for image in images:
+        filename = (image.filename or "").strip()
+        if filename:
+            placeholders.append(f"Image: {filename}")
+        else:
+            placeholders.append("Image: file uploaded")
+    return placeholders
+
+
+def _attachment_placeholder_line(attachment: AttachmentInput) -> str:
+    filename = (attachment.filename or "").strip()
+    label = "Image" if attachment.is_image else "Attachment"
+    if filename:
+        return f"{label}: {filename}"
+    return f"{label}: file uploaded"
+
+
 async def node_gating(
     state: GraphState, *, llm: "ChatOpenAI", image_adapter: LLMImageAdapter
 ) -> Dict[str, Any]:
@@ -98,7 +128,7 @@ async def node_gating(
     conversation = state["conversation"]
     parts = state.get("user_parts", [])
 
-    last_msg = conversation.messages[-1].text if conversation.messages else ""
+    last_msg = _format_message_text(conversation.messages[-1]) if conversation.messages else ""
     if not last_msg and parts:
         last_msg = "User provided images without additional text."
 

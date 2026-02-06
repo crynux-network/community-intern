@@ -13,7 +13,7 @@ from community_intern.adapters.discord.handlers import ActionHandler
 from community_intern.adapters.discord.models import GatheredContext, MessageContext
 from community_intern.llm.image_transport import download_images_as_base64
 from community_intern.ai_response import AIResponseService
-from community_intern.core.models import Conversation, ImageInput, Message, RequestContext
+from community_intern.core.models import AttachmentInput, Conversation, ImageInput, Message, RequestContext
 
 logger = logging.getLogger(__name__)
 
@@ -39,13 +39,15 @@ async def _normalize_messages(
     for m in messages:
         text = (m.content or "").strip()
         images: list[ImageInput] = []
+        attachments: list[AttachmentInput] = []
         if llm_enable_image:
             images = await _download_image_inputs(
                 _extract_image_inputs(m),
                 timeout_seconds=image_download_timeout_seconds,
                 max_retries=image_download_max_retries,
             )
-        if not text and not images:
+        attachments = _extract_attachment_inputs(m, include_images=llm_enable_image)
+        if not text and not images and not attachments:
             continue
         if m.author is None:
             role = "user"
@@ -62,6 +64,7 @@ async def _normalize_messages(
                 timestamp=_to_utc_datetime(m.created_at),
                 author_id=str(m.author.id) if m.author is not None else None,
                 images=images or None,
+                attachments=attachments or None,
             )
         )
     return out
@@ -82,31 +85,56 @@ _IMAGE_EXTENSIONS = {
 }
 
 
+def _is_image_attachment(attachment: discord.Attachment) -> bool:
+    content_type = attachment.content_type
+    if content_type:
+        return content_type.startswith("image/")
+    if attachment.filename:
+        lower = attachment.filename.lower()
+        for ext in _IMAGE_EXTENSIONS:
+            if lower.endswith(ext):
+                return True
+    return False
+
+
 def _extract_image_inputs(message: discord.Message) -> list[ImageInput]:
     images: list[ImageInput] = []
     for attachment in message.attachments:
-        content_type = attachment.content_type
-        is_image = False
-        if content_type:
-            is_image = content_type.startswith("image/")
-        elif attachment.filename:
-            lower = attachment.filename.lower()
-            for ext in _IMAGE_EXTENSIONS:
-                if lower.endswith(ext):
-                    is_image = True
-                    break
-        if not is_image:
+        if not _is_image_attachment(attachment):
             continue
         images.append(
             ImageInput(
                 url=attachment.url,
-                mime_type=content_type,
+                mime_type=attachment.content_type,
                 filename=attachment.filename,
                 size_bytes=attachment.size,
                 source="discord",
             )
         )
     return images
+
+
+def _extract_attachment_inputs(
+    message: discord.Message,
+    *,
+    include_images: bool,
+) -> list[AttachmentInput]:
+    attachments: list[AttachmentInput] = []
+    for attachment in message.attachments:
+        is_image = _is_image_attachment(attachment)
+        if is_image and not include_images:
+            continue
+        attachments.append(
+            AttachmentInput(
+                url=attachment.url,
+                mime_type=attachment.content_type,
+                filename=attachment.filename,
+                size_bytes=attachment.size,
+                source="discord",
+                is_image=is_image,
+            )
+        )
+    return attachments
 
 
 async def _download_image_inputs(
@@ -227,7 +255,11 @@ class AIResponseHandler(ActionHandler):
         gathered_context: GatheredContext,
     ) -> None:
         messages = gathered_context.batch
-        messages = [m for m in messages if _message_has_text_or_images(m)]
+        messages = [
+            m
+            for m in messages
+            if _message_has_text_or_attachments(m, llm_enable_image=self._llm_enable_image)
+        ]
         if not messages:
             return
 
@@ -487,7 +519,12 @@ class AIResponseHandler(ActionHandler):
         )
 
 
-def _message_has_text_or_images(message: discord.Message) -> bool:
+def _message_has_text_or_attachments(
+    message: discord.Message,
+    *,
+    llm_enable_image: bool,
+) -> bool:
     if (message.content or "").strip():
         return True
-    return any(_extract_image_inputs(message))
+    attachments = _extract_attachment_inputs(message, include_images=llm_enable_image)
+    return bool(attachments)
