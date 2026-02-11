@@ -362,7 +362,8 @@ def _format_conversation_context(
         if not content_lines and any(is_image_attachment(att) for att in msg.attachments):
             content_lines.append("Image-only message.")
         if content_lines:
-            lines.append(f"{role}: {'\\n'.join(content_lines)}")
+            joined = "\n".join(content_lines)
+            lines.append(f"{role}: {joined}")
     return "\n".join(lines).strip()
 
 
