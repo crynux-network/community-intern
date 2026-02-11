@@ -1,10 +1,12 @@
 import logging
 import asyncio
-from typing import Optional, Sequence
+from typing import Optional
 from langchain_core.runnables import Runnable
 from community_intern.ai_response.config import AIConfig
 from community_intern.llm.image_adapters import ContentPart, ImagePart, TextPart, get_image_adapter
-from community_intern.core.models import AIResult, AttachmentInput, Conversation, ImageInput, Message, RequestContext
+from community_intern.core.formatters import format_message_as_text
+from community_intern.core.models import AIResult, Conversation, RequestContext
+from community_intern.llm.image_utils import build_base64_images
 from community_intern.kb.interfaces import KnowledgeBase
 from community_intern.ai_response.graph import build_ai_graph, GraphState
 
@@ -117,14 +119,9 @@ def _build_user_parts(conversation: Conversation) -> list[ContentPart]:
             continue
         text_lines = format_message_as_text(msg)
         if text_lines:
-            parts.append(TextPart(type="text", text=f"User: {'\\n'.join(text_lines)}"))
+            joined = "\n".join(text_lines)
+            parts.append(TextPart(type="text", text=f"User: {joined}"))
         if msg.images:
             base64_images = build_base64_images(msg.images)
             parts.extend([ImagePart(type="image", image=img) for img in base64_images])
     return parts
-
-
-
-
-
-
