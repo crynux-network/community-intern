@@ -33,7 +33,7 @@ class LLMInvoker:
             base_url=llm.base_url,
             api_key=llm.api_key,
             model=llm.model,
-            **({"vram_limit": llm.vram_limit} if llm.vram_limit is not None else {}),
+            **llm.chat_crynux_kwargs(),
             temperature=0.0,
             request_timeout=llm.timeout_seconds,
             max_retries=llm.max_retries,

@@ -48,7 +48,7 @@ The Knowledge Base reads these keys under the `kb` section:
 - `kb.team_index_path`
 - `kb.team_index_cache_path`
 
-`kb.llm` defines optional LLM overrides for Knowledge Base operations. When `kb.llm` is `null`, the Knowledge Base MUST use the `ai_response.llm` settings. When configured, `kb.llm` MUST define `base_url`, `api_key`, `model`, `vram_limit`, `structured_output_method`, `timeout_seconds`, and `max_retries`.
+`kb.llm` defines optional LLM overrides for Knowledge Base operations. When `kb.llm` is `null`, the Knowledge Base MUST use the `ai_response.llm` settings. When configured, `kb.llm` MUST define `base_url`, `api_key`, `model`, `timeout_seconds`, and `max_retries`. It MAY define `vram_limit`, `max_completion_tokens`, and `structured_output_method`.
 
 The Knowledge Base uses the shared LLM invoker in `src/community_intern/llm/invoker.py`, which creates ChatCrynux configured from `kb.llm` when set, or from `ai_response.llm` when `kb.llm` is `null`.
 

@@ -145,6 +145,7 @@ The `ai_response.llm` object defines:
 - `api_key`: API key for the LLM.
 - `model`: Model name to use.
 - `vram_limit`: Minimum GPU VRAM required for the inference run in GB.
+- `max_completion_tokens`: Maximum generated tokens per LLM call.
 - `structured_output_method`: Structured output mode (`json_schema` or `function_calling`).
 - `timeout_seconds`: Timeout per individual LLM call (network timeout).
 - `max_retries`: Maximum retry attempts for transient failures.
