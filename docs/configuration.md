@@ -36,6 +36,7 @@ Example mappings:
 - `APP__DISCORD__TOKEN` -> `discord.token`
 - `APP__AI_RESPONSE__GRAPH_TIMEOUT_SECONDS` -> `ai_response.graph_timeout_seconds`
 - `APP__AI_RESPONSE__LLM__API_KEY` -> `ai_response.llm.api_key`
+- `APP__AI_RESPONSE__LLM__MAX_COMPLETION_TOKENS` -> `ai_response.llm.max_completion_tokens`
 - `APP__KB__SOURCES_DIR` -> `kb.sources_dir`
 
 ## Environment variable value parsing
