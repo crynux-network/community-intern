@@ -92,10 +92,11 @@ class AIResponseService:
             )
 
             reply_text = final_state.get("final_reply_text")
+            selected_source_ids = list(final_state.get("selected_source_ids", []))
             if reply_text:
                 reply_text = _append_selected_links(
                     reply_text,
-                    selected_source_ids=list(final_state.get("selected_source_ids", [])),
+                    selected_source_ids=selected_source_ids,
                 )
 
             return AIResult(

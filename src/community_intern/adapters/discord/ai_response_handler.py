@@ -4,7 +4,7 @@ import asyncio
 import logging
 import time
 from datetime import datetime, timezone
-from typing import Awaitable, Callable, Iterable, TypeVar
+from typing import Awaitable, Callable, Iterable, Sequence, TypeVar
 
 import aiohttp
 import discord
@@ -18,6 +18,13 @@ from community_intern.adapters.discord.utils import (
 )
 from community_intern.ai_response import AIResponseService
 from community_intern.core.models import AttachmentInput, Conversation, ImageInput, Message, RequestContext
+from community_intern.logging.flow import (
+    conversation_log_stats,
+    format_conversation_messages,
+    format_discord_flow_log,
+    format_text_preview,
+    text_chars,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +87,44 @@ def _thread_name_from_message(text: str) -> str:
         return "FAQ Answer"
     base = base[:80]
     return f"FAQ: {base}"
+
+
+def _conversation_flow_fields(
+    *,
+    event: str,
+    routing: str,
+    messages: Sequence[Message],
+) -> list[tuple[str, object]]:
+    stats = conversation_log_stats(messages)
+    return [
+        ("Event", event),
+        ("Routing", routing),
+        ("Message count", stats["message_count"]),
+        ("User message count", stats["user_message_count"]),
+        ("Assistant message count", stats["assistant_message_count"]),
+        ("Message characters", stats["message_chars"]),
+        ("Image count", stats["image_count"]),
+        ("Attachment count", stats["attachment_count"]),
+        ("Message", format_conversation_messages(messages)),
+    ]
+
+
+def _log_conversation_flow(
+    *,
+    event: str,
+    routing: str,
+    messages: Sequence[Message],
+) -> None:
+    logger.info(
+        "%s",
+        format_discord_flow_log(
+            fields=_conversation_flow_fields(
+                event=event,
+                routing=routing,
+                messages=messages,
+            )
+        ),
+    )
 
 
 _RETRYABLE_DISCORD_HTTP_ERRORS: tuple[type[BaseException], ...] = (
@@ -225,9 +270,34 @@ class AIResponseHandler(ActionHandler):
             )
 
         if not result.should_reply or not result.reply_text:
+            reason = "The AI result says not to reply" if not result.should_reply else "The AI reply text is empty"
+            logger.info(
+                "%s",
+                format_discord_flow_log(
+                    fields=[
+                        ("Event", "Discord reply skipped"),
+                        ("Routing", "Channel message"),
+                        ("Reason", reason),
+                        ("Message", format_conversation_messages(conversation_messages)),
+                    ]
+                ),
+            )
             return
 
         if self._dry_run:
+            logger.info(
+                "%s",
+                format_discord_flow_log(
+                    fields=[
+                        ("Event", "Discord reply skipped"),
+                        ("Routing", "Channel message"),
+                        ("Reason", "Dry run is enabled"),
+                        ("Message", format_conversation_messages(conversation_messages)),
+                        ("Reply characters", text_chars(result.reply_text)),
+                        ("Reply", format_text_preview(result.reply_text)),
+                    ]
+                ),
+            )
             logger.info(
                 "Dry run enabled, skipping Discord reply. platform=discord guild_id=%s channel_id=%s message_id=%s",
                 request_context.guild_id,
@@ -236,7 +306,12 @@ class AIResponseHandler(ActionHandler):
             )
             return
 
-        await self._create_thread_and_reply(last_message, result.reply_text, request_context)
+        await self._create_thread_and_reply(
+            last_message,
+            result.reply_text,
+            request_context,
+            conversation_messages=conversation_messages,
+        )
 
     async def _handle_thread(
         self,
@@ -271,6 +346,11 @@ class AIResponseHandler(ActionHandler):
         if not normalized:
             return
 
+        _log_conversation_flow(
+            event="Discord thread history has been converted into the LLM conversation input",
+            routing="Thread update",
+            messages=normalized,
+        )
         channel_id = str(thread.parent_id) if thread.parent_id is not None else str(thread.id)
         request_context = RequestContext(
             platform="discord",
@@ -284,6 +364,11 @@ class AIResponseHandler(ActionHandler):
 
         started = time.perf_counter()
         try:
+            _log_conversation_flow(
+                event="AI reply generation is starting for a thread update",
+                routing="Thread update",
+                messages=normalized,
+            )
             result = await self._ai_client.generate_reply(conversation=conversation, context=request_context)
         except Exception:
             logger.exception(
@@ -306,9 +391,34 @@ class AIResponseHandler(ActionHandler):
             )
 
         if not result.should_reply or not result.reply_text:
+            reason = "The AI result says not to reply" if not result.should_reply else "The AI reply text is empty"
+            logger.info(
+                "%s",
+                format_discord_flow_log(
+                    fields=[
+                        ("Event", "Discord reply skipped"),
+                        ("Routing", "Thread update"),
+                        ("Reason", reason),
+                        ("Message", format_conversation_messages(normalized)),
+                    ]
+                ),
+            )
             return
 
         if self._dry_run:
+            logger.info(
+                "%s",
+                format_discord_flow_log(
+                    fields=[
+                        ("Event", "Discord reply skipped"),
+                        ("Routing", "Thread update"),
+                        ("Reason", "Dry run is enabled"),
+                        ("Message", format_conversation_messages(normalized)),
+                        ("Reply characters", text_chars(result.reply_text)),
+                        ("Reply", format_text_preview(result.reply_text)),
+                    ]
+                ),
+            )
             logger.info(
                 "Dry run enabled, skipping Discord reply. platform=discord guild_id=%s channel_id=%s thread_id=%s message_id=%s",
                 request_context.guild_id,
@@ -318,13 +428,20 @@ class AIResponseHandler(ActionHandler):
             )
             return
 
-        await self._post_thread_reply(thread, result.reply_text, request_context)
+        await self._post_thread_reply(
+            thread,
+            result.reply_text,
+            request_context,
+            conversation_messages=normalized,
+        )
 
     async def _create_thread_and_reply(
         self,
         message: discord.Message,
         reply_text: str,
         request_context: RequestContext,
+        *,
+        conversation_messages: Sequence[Message],
     ) -> None:
         thread_name = _thread_name_from_message(message.content or "")
         log_context = (
@@ -352,6 +469,28 @@ class AIResponseHandler(ActionHandler):
             return
 
         try:
+            logger.info(
+                "%s",
+                format_discord_flow_log(
+                    fields=[
+                        ("Event", "Discord thread has been created"),
+                        ("Routing", "Channel message"),
+                        ("Message", format_conversation_messages(conversation_messages)),
+                    ]
+                ),
+            )
+            logger.info(
+                "%s",
+                format_discord_flow_log(
+                    fields=[
+                        ("Event", "Discord reply send is starting for a new thread"),
+                        ("Routing", "Channel message"),
+                        ("Message", format_conversation_messages(conversation_messages)),
+                        ("Reply characters", text_chars(reply_text)),
+                        ("Reply", format_text_preview(reply_text)),
+                    ]
+                ),
+            )
             await _retry_async(
                 "post_message",
                 attempts=3,
@@ -389,12 +528,26 @@ class AIResponseHandler(ActionHandler):
         thread: discord.Thread,
         reply_text: str,
         request_context: RequestContext,
+        *,
+        conversation_messages: Sequence[Message],
     ) -> None:
         log_context = (
             f"platform=discord guild_id={request_context.guild_id} channel_id={request_context.channel_id} "
             f"thread_id={request_context.thread_id} message_id={request_context.message_id}"
         )
         try:
+            logger.info(
+                "%s",
+                format_discord_flow_log(
+                    fields=[
+                        ("Event", "Discord reply send is starting for an existing thread"),
+                        ("Routing", "Thread update"),
+                        ("Message", format_conversation_messages(conversation_messages)),
+                        ("Reply characters", text_chars(reply_text)),
+                        ("Reply", format_text_preview(reply_text)),
+                    ]
+                ),
+            )
             await _retry_async(
                 "post_message",
                 attempts=3,

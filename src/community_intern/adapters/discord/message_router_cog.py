@@ -16,6 +16,7 @@ from community_intern.adapters.discord.handlers import ActionHandler
 from community_intern.adapters.discord.models import GatheredContext
 from community_intern.ai_response import AIResponseService
 from community_intern.config.models import DiscordSettings
+from community_intern.logging.flow import format_discord_flow_log, format_discord_messages
 
 logger = logging.getLogger(__name__)
 
@@ -215,6 +216,17 @@ class MessageRouterCog(commands.Cog):
             str(messages[-1].id),
             generation,
         )
+        logger.info(
+            "%s",
+            format_discord_flow_log(
+                fields=[
+                    ("Event", "Discord message batch is ready to process"),
+                    ("Batch size", len(messages)),
+                    ("Generation", generation),
+                    ("Message", format_discord_messages(messages)),
+                ]
+            ),
+        )
         del self._pending_batches[key]
 
         try:
@@ -238,6 +250,18 @@ class MessageRouterCog(commands.Cog):
         gathered_context = await self._context_gatherer.gather(
             batch=messages,
             message=last_message,
+        )
+        logger.info(
+            "%s",
+            format_discord_flow_log(
+                fields=[
+                    ("Event", "Discord context has been gathered"),
+                    ("Batch size", len(messages)),
+                    ("Thread history count", len(gathered_context.thread_history)),
+                    ("Reply chain count", len(gathered_context.reply_chain)),
+                    ("Message", format_discord_messages(messages)),
+                ]
+            ),
         )
 
         await self._action_router.route(last_message, context, gathered_context)
