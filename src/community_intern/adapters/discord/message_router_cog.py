@@ -131,6 +131,9 @@ class MessageRouterCog(commands.Cog):
         if message.author is not None and message.author.bot:
             return
 
+        if message.type is discord.MessageType.thread_created:
+            return
+
         if not _message_has_text_or_images(message, allow_images=self._llm_enable_image):
             return
 

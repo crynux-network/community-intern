@@ -87,6 +87,11 @@ def _image_part_count(parts: Sequence[ContentPart]) -> int:
     return sum(1 for part in parts if isinstance(part, ImagePart))
 
 
+def _format_prior_conversation_as_text(conversation: Conversation) -> str:
+    prior_messages = tuple(conversation.messages[:-1]) if conversation.messages else ()
+    return format_conversation_as_text(Conversation(messages=prior_messages))
+
+
 def _log_llm_flow(fields: Sequence[tuple[str, object]]) -> None:
     logger.info("%s", format_llm_flow_log(fields=fields))
 
@@ -116,8 +121,7 @@ async def node_gating(
         include_raw=True,
     )
 
-    prior_messages = tuple(conversation.messages[:-1]) if conversation.messages else ()
-    history_text = format_conversation_as_text(Conversation(messages=prior_messages))
+    history_text = _format_prior_conversation_as_text(conversation)
     history_block = f"Conversation history:\n{history_text}\n\n" if history_text else ""
     messages = [
         SystemMessage(
@@ -198,7 +202,7 @@ async def node_selection(
         include_raw=True,
     )
 
-    history_text = format_conversation_as_text(conversation)
+    history_text = _format_prior_conversation_as_text(conversation)
     history_block = f"Conversation history:\n{history_text}\n\n" if history_text else ""
     # Append max_sources instruction to the base prompt
     base_prompt = config.selection_prompt
@@ -322,7 +326,7 @@ async def node_generation(
         include_raw=True,
     )
 
-    history_text = format_conversation_as_text(conversation)
+    history_text = _format_prior_conversation_as_text(conversation)
     history_block = f"Conversation history:\n{history_text}\n\n" if history_text else ""
     messages = [
         SystemMessage(
