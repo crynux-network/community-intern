@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from typing import Any
 
 from community_intern.core.formatters import format_message_as_text
@@ -41,7 +41,11 @@ def format_llm_flow_log(*, fields: Sequence[tuple[str, Any]]) -> str:
     return format_flow_log(title=_LLM_FLOW_TITLE, fields=fields)
 
 
-def format_discord_messages(messages: Iterable[Any]) -> str:
+def format_discord_messages(
+    messages: Iterable[Any],
+    *,
+    role_resolver: Callable[[Any], str] | None = None,
+) -> str:
     lines: list[str] = []
     for message in messages:
         text = _normalize_text(getattr(message, "content", "") or "")
@@ -49,7 +53,8 @@ def format_discord_messages(messages: Iterable[Any]) -> str:
         parts = [part for part in [text, *placeholders] if part]
         if not parts:
             continue
-        lines.append(f"user: {' | '.join(parts)}")
+        role = role_resolver(message) if role_resolver is not None else "user"
+        lines.append(f"{role}: {' | '.join(parts)}")
     return "\n".join(lines) if lines else "No message content."
 
 

@@ -17,6 +17,7 @@ from community_intern.adapters.discord.utils import (
     extract_image_inputs,
 )
 from community_intern.ai_response import AIResponseService
+from community_intern.core.formatters import truncate_reply_text
 from community_intern.core.models import AttachmentInput, Conversation, ImageInput, Message, RequestContext
 from community_intern.logging.flow import (
     conversation_log_stats,
@@ -29,6 +30,18 @@ from community_intern.logging.flow import (
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
+
+
+def _prepare_discord_reply(reply_text: str, *, char_limit: int, log_context: str) -> str:
+    prepared = truncate_reply_text(reply_text, char_limit)
+    if len(prepared) < len(reply_text):
+        logger.info(
+            "Reply text truncated to fit the Discord message limit. original_chars=%s sent_chars=%s %s",
+            len(reply_text),
+            len(prepared),
+            log_context,
+        )
+    return prepared
 
 
 def _to_utc_datetime(dt: datetime) -> datetime:
@@ -175,6 +188,7 @@ class AIResponseHandler(ActionHandler):
         ai_client: AIResponseService,
         bot_user_id: int,
         team_member_ids: frozenset[str],
+        message_char_limit: int,
         dry_run: bool,
         llm_enable_image: bool,
         image_download_timeout_seconds: float,
@@ -183,6 +197,7 @@ class AIResponseHandler(ActionHandler):
         self._ai_client = ai_client
         self._bot_user_id = bot_user_id
         self._team_member_ids = team_member_ids
+        self._message_char_limit = message_char_limit
         self._dry_run = dry_run
         self._llm_enable_image = llm_enable_image
         self._image_download_timeout_seconds = image_download_timeout_seconds
@@ -448,6 +463,9 @@ class AIResponseHandler(ActionHandler):
             f"platform=discord guild_id={request_context.guild_id} "
             f"channel_id={request_context.channel_id} message_id={request_context.message_id}"
         )
+        reply_text = _prepare_discord_reply(
+            reply_text, char_limit=self._message_char_limit, log_context=log_context
+        )
         try:
             thread = await _retry_async(
                 "create_thread",
@@ -534,6 +552,9 @@ class AIResponseHandler(ActionHandler):
         log_context = (
             f"platform=discord guild_id={request_context.guild_id} channel_id={request_context.channel_id} "
             f"thread_id={request_context.thread_id} message_id={request_context.message_id}"
+        )
+        reply_text = _prepare_discord_reply(
+            reply_text, char_limit=self._message_char_limit, log_context=log_context
         )
         try:
             logger.info(

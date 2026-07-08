@@ -51,6 +51,29 @@ def format_message_as_text(msg: Message) -> list[str]:
     return text_lines
 
 
+def truncate_reply_text(reply_text: str, max_chars: int) -> str:
+    """
+    Truncates a reply to fit within max_chars by cutting the end of the body text.
+
+    A trailing "Links:" section (as appended by the AI response service) is kept
+    intact; only the body before it is shortened.
+    """
+    if len(reply_text) <= max_chars:
+        return reply_text
+
+    ellipsis = "..."
+    links_start = reply_text.rfind("\n\nLinks:\n")
+    if links_start == -1:
+        return reply_text[: max_chars - len(ellipsis)].rstrip() + ellipsis
+
+    body = reply_text[:links_start]
+    links = reply_text[links_start:]
+    body_budget = max_chars - len(links) - len(ellipsis)
+    if body_budget <= 0:
+        return reply_text[: max_chars - len(ellipsis)].rstrip() + ellipsis
+    return body[:body_budget].rstrip() + ellipsis + links
+
+
 def format_conversation_as_text(
     conversation: Conversation,
     role_map: Optional[Dict[str, str]] = None

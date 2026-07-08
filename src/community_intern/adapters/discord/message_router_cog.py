@@ -114,6 +114,7 @@ class MessageRouterCog(commands.Cog):
             ai_client=self._ai_client,
             bot_user_id=bot_user_id,
             team_member_ids=team_member_ids,
+            message_char_limit=self._settings.message_char_limit,
             dry_run=self._dry_run,
             llm_enable_image=self._llm_enable_image,
             image_download_timeout_seconds=self._image_download_timeout_seconds,
@@ -193,6 +194,16 @@ class MessageRouterCog(commands.Cog):
             generation,
         )
 
+    def _resolve_log_role(self, message: discord.Message) -> str:
+        if self._classifier is None or message.author is None:
+            return "user"
+        author_type = self._classifier.classify_author(message.author.id)
+        if author_type == "team_member":
+            return "team"
+        if author_type == "bot":
+            return "bot"
+        return "user"
+
     async def _flush_batch_after_wait(self, *, key: tuple[str, str, str], generation: int) -> None:
         try:
             await asyncio.sleep(self._settings.message_batch_wait_seconds)
@@ -207,6 +218,31 @@ class MessageRouterCog(commands.Cog):
 
         messages = pending.messages
         if not messages:
+            del self._pending_batches[key]
+            return
+
+        messages, deleted_ids = await _filter_undeleted_messages(messages)
+        if deleted_ids:
+            logger.info(
+                "Batched Discord messages were deleted before processing. platform=discord guild_id=%s channel_id=%s author_id=%s deleted_count=%s deleted_message_ids=%s remaining_count=%s",
+                key[0],
+                key[1],
+                key[2],
+                len(deleted_ids),
+                ", ".join(deleted_ids),
+                len(messages),
+            )
+        if not messages:
+            logger.info(
+                "%s",
+                format_discord_flow_log(
+                    fields=[
+                        ("Event", "Discord message batch skipped"),
+                        ("Reason", "All batched messages were deleted"),
+                        ("Deleted message IDs", deleted_ids),
+                    ]
+                ),
+            )
             del self._pending_batches[key]
             return
 
@@ -226,7 +262,7 @@ class MessageRouterCog(commands.Cog):
                     ("Event", "Discord message batch is ready to process"),
                     ("Batch size", len(messages)),
                     ("Generation", generation),
-                    ("Message", format_discord_messages(messages)),
+                    ("Message", format_discord_messages(messages, role_resolver=self._resolve_log_role)),
                 ]
             ),
         )
@@ -262,7 +298,7 @@ class MessageRouterCog(commands.Cog):
                     ("Batch size", len(messages)),
                     ("Thread history count", len(gathered_context.thread_history)),
                     ("Reply chain count", len(gathered_context.reply_chain)),
-                    ("Message", format_discord_messages(messages)),
+                    ("Message", format_discord_messages(messages, role_resolver=self._resolve_log_role)),
                 ]
             ),
         )
@@ -284,3 +320,27 @@ def _message_has_text_or_images(message: discord.Message, *, allow_images: bool)
             if any(filename.endswith(ext) for ext in _IMAGE_EXTENSIONS):
                 return True
     return False
+
+
+async def _filter_undeleted_messages(
+    messages: list[discord.Message],
+) -> tuple[list[discord.Message], list[str]]:
+    existing: list[discord.Message] = []
+    deleted_ids: list[str] = []
+    for message in messages:
+        channel = message.channel
+        if not hasattr(channel, "fetch_message"):
+            existing.append(message)
+            continue
+        try:
+            await channel.fetch_message(message.id)
+            existing.append(message)
+        except discord.NotFound:
+            deleted_ids.append(str(message.id))
+        except discord.DiscordException:
+            logger.exception(
+                "Failed to verify Discord message exists. message_id=%s",
+                str(message.id),
+            )
+            existing.append(message)
+    return existing, deleted_ids
