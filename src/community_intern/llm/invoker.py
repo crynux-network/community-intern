@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+import time
 from typing import Optional, Sequence, Type, TypeVar
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -11,8 +13,12 @@ from community_intern.llm.image_adapters import ImagePart, TextPart, get_image_a
 from community_intern.core.models import ImageInput
 from community_intern.llm.image_utils import build_base64_images
 from community_intern.llm.settings import LLMSettings
+from community_intern.llm.structured_output import parse_structured_llm_result
+from community_intern.logging.flow import format_llm_flow_log, format_text_preview, text_chars
 
 T = TypeVar("T", bound=BaseModel)
+
+logger = logging.getLogger(__name__)
 
 
 class LLMInvoker:
@@ -51,6 +57,7 @@ class LLMInvoker:
         images: Optional[Sequence[ImageInput]] = None,
         response_model: Type[T],
     ) -> T:
+        image_count = len(images) if images else 0
         if images:
             if not self._llm_enable_image:
                 raise RuntimeError("Image input is disabled by configuration.")
@@ -74,20 +81,45 @@ class LLMInvoker:
         structured_llm = self._llm.with_structured_output(
             response_model,
             method=self._llm_config.structured_output_method,
+            include_raw=True,
+        )
+        started = time.perf_counter()
+        logger.info(
+            "%s",
+            format_llm_flow_log(
+                fields=[
+                    ("Event", "Generic structured LLM request is starting"),
+                    ("Response model", response_model.__name__),
+                    ("Model", self._llm_config.model),
+                    ("Has images", image_count > 0),
+                    ("Image count", image_count),
+                    ("System prompt characters", text_chars(system_prompt)),
+                    ("User content characters", text_chars(user_content)),
+                    ("User content", format_text_preview(user_content)),
+                    ("Timeout seconds", self._llm_config.timeout_seconds),
+                ]
+            ),
         )
         result = await asyncio.wait_for(
             structured_llm.ainvoke(messages),
             timeout=self._llm_config.timeout_seconds,
         )
-        if result is None:
-            raise RuntimeError("LLM returned null structured output.")
+        validated, response_id = parse_structured_llm_result(result, response_model)
 
-        if isinstance(result, response_model):
-            return result
-
-        try:
-            return response_model.model_validate(result)
-        except Exception as exc:
-            raise RuntimeError(
-                f"LLM returned unexpected structured output. expected={response_model.__name__} got={type(result).__name__}"
-            ) from exc
+        logger.info(
+            "%s",
+            format_llm_flow_log(
+                fields=[
+                    ("Event", "Generic structured LLM result has been received"),
+                    ("Response model", response_model.__name__),
+                    ("Model", self._llm_config.model),
+                    ("ID", response_id),
+                    ("Result type", type(validated).__name__),
+                    (
+                        "Elapsed milliseconds",
+                        int((time.perf_counter() - started) * 1000),
+                    ),
+                ]
+            ),
+        )
+        return validated

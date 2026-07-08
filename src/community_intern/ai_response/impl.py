@@ -3,8 +3,7 @@ import asyncio
 from typing import Optional
 from langchain_core.runnables import Runnable
 from community_intern.ai_response.config import AIConfig
-from community_intern.llm.image_adapters import ContentPart, ImagePart, TextPart, get_image_adapter
-from community_intern.core.formatters import format_message_as_text
+from community_intern.llm.image_adapters import ContentPart, ImagePart, get_image_adapter
 from community_intern.core.models import AIResult, Conversation, RequestContext
 from community_intern.llm.image_utils import build_base64_images
 from community_intern.kb.interfaces import KnowledgeBase
@@ -92,10 +91,11 @@ class AIResponseService:
             )
 
             reply_text = final_state.get("final_reply_text")
+            selected_source_ids = list(final_state.get("selected_source_ids", []))
             if reply_text:
                 reply_text = _append_selected_links(
                     reply_text,
-                    selected_source_ids=list(final_state.get("selected_source_ids", [])),
+                    selected_source_ids=selected_source_ids,
                 )
 
             return AIResult(
@@ -117,10 +117,6 @@ def _build_user_parts(conversation: Conversation) -> list[ContentPart]:
     for msg in conversation.messages:
         if msg.role != "user":
             continue
-        text_lines = format_message_as_text(msg)
-        if text_lines:
-            joined = "\n".join(text_lines)
-            parts.append(TextPart(type="text", text=f"User: {joined}"))
         if msg.images:
             base64_images = build_base64_images(msg.images)
             parts.extend([ImagePart(type="image", image=img) for img in base64_images])

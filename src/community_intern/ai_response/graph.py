@@ -1,4 +1,5 @@
 import logging
+import time
 from functools import partial
 from typing import Any, Dict, List, Optional, Sequence, TYPE_CHECKING, TypedDict
 
@@ -13,7 +14,15 @@ from community_intern.llm.image_adapters import ContentPart, ImagePart, LLMImage
 from community_intern.core.models import AttachmentInput, Conversation, ImageInput, Message, RequestContext, AIResult
 from community_intern.kb.interfaces import KnowledgeBase, SourceContent
 from community_intern.llm.prompts import compose_system_prompt
+from community_intern.llm.structured_output import parse_structured_llm_result
 from community_intern.core.formatters import format_message_as_text, format_conversation_as_text
+from community_intern.logging.flow import (
+    format_conversation_messages,
+    format_llm_flow_log,
+    format_source_ids,
+    format_text_preview,
+    text_chars,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +83,19 @@ def _build_user_message(
     return HumanMessage(content=content)
 
 
+def _image_part_count(parts: Sequence[ContentPart]) -> int:
+    return sum(1 for part in parts if isinstance(part, ImagePart))
+
+
+def _format_prior_conversation_as_text(conversation: Conversation) -> str:
+    prior_messages = tuple(conversation.messages[:-1]) if conversation.messages else ()
+    return format_conversation_as_text(Conversation(messages=prior_messages))
+
+
+def _log_llm_flow(fields: Sequence[tuple[str, object]]) -> None:
+    logger.info("%s", format_llm_flow_log(fields=fields))
+
+
 
 
 
@@ -96,9 +118,10 @@ async def node_gating(
     structured_llm = llm.with_structured_output(
         LLMGateDecision,
         method=config.llm.structured_output_method,
+        include_raw=True,
     )
 
-    history_text = format_conversation_as_text(conversation)
+    history_text = _format_prior_conversation_as_text(conversation)
     history_block = f"Conversation history:\n{history_text}\n\n" if history_text else ""
     messages = [
         SystemMessage(
@@ -116,7 +139,34 @@ async def node_gating(
     ]
 
     try:
-        decision: LLMGateDecision = await structured_llm.ainvoke(messages)
+        started = time.perf_counter()
+        _log_llm_flow(
+            [
+                ("Event", "LLM gating request is starting"),
+                ("Step", "gating"),
+                ("Message characters", text_chars(format_conversation_messages(conversation))),
+                ("Has images", bool(parts)),
+                ("Image count", _image_part_count(parts)),
+                ("Message", format_conversation_messages(conversation)),
+            ]
+        )
+        result = await structured_llm.ainvoke(messages)
+        decision, response_id = parse_structured_llm_result(
+            result,
+            LLMGateDecision,
+        )
+        next_step = "selection" if decision.should_reply else "end"
+        _log_llm_flow(
+            [
+                ("Event", "LLM gating result has been received"),
+                ("Step", "gating"),
+                ("ID", response_id),
+                ("Should reply", decision.should_reply),
+                ("Next step", next_step),
+                ("Elapsed milliseconds", int((time.perf_counter() - started) * 1000)),
+                ("Message", format_conversation_messages(conversation)),
+            ]
+        )
 
         return {
             "user_question": last_msg,
@@ -149,9 +199,10 @@ async def node_selection(
     structured_llm = llm.with_structured_output(
         LLMSelectionResult,
         method=config.llm.structured_output_method,
+        include_raw=True,
     )
 
-    history_text = format_conversation_as_text(conversation)
+    history_text = _format_prior_conversation_as_text(conversation)
     history_block = f"Conversation history:\n{history_text}\n\n" if history_text else ""
     # Append max_sources instruction to the base prompt
     base_prompt = config.selection_prompt
@@ -174,8 +225,39 @@ async def node_selection(
     ]
 
     try:
-        result: LLMSelectionResult = await structured_llm.ainvoke(messages)
+        started = time.perf_counter()
+        _log_llm_flow(
+            [
+                ("Event", "LLM source selection request is starting"),
+                ("Step", "selection"),
+                ("Query characters", text_chars(query)),
+                ("Query", format_text_preview(query)),
+                ("Knowledge base index characters", text_chars(kb_index_text)),
+                ("Has images", bool(parts)),
+                ("Image count", _image_part_count(parts)),
+                ("Maximum sources", config.max_sources),
+                ("Message", format_conversation_messages(conversation)),
+            ]
+        )
+        raw_result = await structured_llm.ainvoke(messages)
+        result, response_id = parse_structured_llm_result(
+            raw_result,
+            LLMSelectionResult,
+        )
         selected_ids = result.selected_source_ids[:config.max_sources]
+        next_step = "loading" if selected_ids else "end"
+        _log_llm_flow(
+            [
+                ("Event", "LLM source selection result has been received"),
+                ("Step", "selection"),
+                ("ID", response_id),
+                ("Selected source count", len(selected_ids)),
+                ("Selected source IDs", format_source_ids(selected_ids)),
+                ("Next step", next_step),
+                ("Elapsed milliseconds", int((time.perf_counter() - started) * 1000)),
+                ("Message", format_conversation_messages(conversation)),
+            ]
+        )
 
         if not selected_ids:
             return {"selected_source_ids": [], "should_reply": False}
@@ -198,8 +280,30 @@ async def node_loading(state: GraphState) -> Dict[str, Any]:
         loaded.append(content)
 
     if not loaded:
+        _log_llm_flow(
+            [
+                ("Event", "Knowledge sources for generation have been loaded"),
+                ("Step", "loading"),
+                ("Selected source count", len(selected_ids)),
+                ("Loaded source count", 0),
+                ("Loaded source IDs", "None"),
+                ("Next step", "end"),
+                ("Message", format_conversation_messages(state["conversation"])),
+            ]
+        )
         return {"loaded_sources": [], "should_reply": False}
 
+    _log_llm_flow(
+        [
+            ("Event", "Knowledge sources for generation have been loaded"),
+            ("Step", "loading"),
+            ("Selected source count", len(selected_ids)),
+            ("Loaded source count", len(loaded)),
+            ("Loaded source IDs", format_source_ids(source.source_id for source in loaded)),
+            ("Next step", "generation"),
+            ("Message", format_conversation_messages(state["conversation"])),
+        ]
+    )
     return {"loaded_sources": loaded}
 
 
@@ -219,9 +323,10 @@ async def node_generation(
     structured_llm = llm.with_structured_output(
         LLMGenerationResult,
         method=config.llm.structured_output_method,
+        include_raw=True,
     )
 
-    history_text = format_conversation_as_text(conversation)
+    history_text = _format_prior_conversation_as_text(conversation)
     history_block = f"Conversation history:\n{history_text}\n\n" if history_text else ""
     messages = [
         SystemMessage(
@@ -239,10 +344,46 @@ async def node_generation(
     ]
 
     try:
-        result: LLMGenerationResult = await structured_llm.ainvoke(messages)
+        started = time.perf_counter()
+        source_ids = [source.source_id for source in loaded]
+        _log_llm_flow(
+            [
+                ("Event", "LLM answer generation request is starting"),
+                ("Step", "generation"),
+                ("Query characters", text_chars(query)),
+                ("Query", format_text_preview(query)),
+                ("Source count", len(source_ids)),
+                ("Source IDs", format_source_ids(source_ids)),
+                ("Has images", bool(parts)),
+                ("Image count", _image_part_count(parts)),
+                ("Verification enabled", config.enable_verification),
+                ("Message", format_conversation_messages(conversation)),
+            ]
+        )
+        raw_result = await structured_llm.ainvoke(messages)
+        result, response_id = parse_structured_llm_result(
+            raw_result,
+            LLMGenerationResult,
+        )
         answer = (result.answer or "").strip()
         # Fix: Some models return the literal string "null" or "Null" when instructed to return null.
         # We treat this as an empty answer.
+        has_answer = bool(answer and answer.lower() != "null")
+        next_step = "verification" if has_answer and config.enable_verification else "end"
+        _log_llm_flow(
+            [
+                ("Event", "LLM answer generation result has been received"),
+                ("Step", "generation"),
+                ("ID", response_id),
+                ("Has answer", has_answer),
+                ("Answer characters", text_chars(answer)),
+                ("Answer", format_text_preview(answer)),
+                ("Verification enabled", config.enable_verification),
+                ("Next step", next_step),
+                ("Elapsed milliseconds", int((time.perf_counter() - started) * 1000)),
+                ("Message", format_conversation_messages(conversation)),
+            ]
+        )
         if not answer or answer.lower() == "null":
             return {"draft_answer": "", "should_reply": False}
         if not config.enable_verification:
@@ -272,6 +413,7 @@ async def node_verification(
     structured_llm = llm.with_structured_output(
         LLMVerificationResult,
         method=config.llm.structured_output_method,
+        include_raw=True,
     )
 
     history_text = format_conversation_as_text(conversation)
@@ -292,9 +434,39 @@ async def node_verification(
     ]
 
     try:
-        result: LLMVerificationResult = await structured_llm.ainvoke(messages)
+        started = time.perf_counter()
+        source_ids = [source.source_id for source in loaded]
+        _log_llm_flow(
+            [
+                ("Event", "LLM answer verification request is starting"),
+                ("Step", "verification"),
+                ("Answer characters", text_chars(draft)),
+                ("Answer", format_text_preview(draft)),
+                ("Source count", len(source_ids)),
+                ("Source IDs", format_source_ids(source_ids)),
+                ("Has images", bool(parts)),
+                ("Image count", _image_part_count(parts)),
+                ("Message", format_conversation_messages(conversation)),
+            ]
+        )
+        raw_result = await structured_llm.ainvoke(messages)
+        result, response_id = parse_structured_llm_result(
+            raw_result,
+            LLMVerificationResult,
+        )
 
         is_good_enough = result.is_good_enough
+        _log_llm_flow(
+            [
+                ("Event", "LLM answer verification result has been received"),
+                ("Step", "verification"),
+                ("ID", response_id),
+                ("Is good enough", is_good_enough),
+                ("Next step", "end"),
+                ("Elapsed milliseconds", int((time.perf_counter() - started) * 1000)),
+                ("Message", format_conversation_messages(conversation)),
+            ]
+        )
         if is_good_enough:
             return {
                 "verification": True,
